@@ -36,7 +36,8 @@ function caps(binding) {
 const order = (section) =>
   section === "global" ? 0 : section.startsWith("layout:") ? 1 : section === "terminal" ? 2 : 3;
 const heading = (section) =>
-  section === "global" ? "Global"
+  section === "mod:agents-list" ? "Sidebar \u00b7 with its keyboard"
+    : section === "global" ? "Global"
     : section.startsWith("layout:") ? `Herdr · ${section.slice("layout:".length)}`
       : section === "terminal" ? "Terminal has the keyboard"
         : section.startsWith("mod:") ? `Panel · ${section.slice("mod:".length)}`
@@ -49,9 +50,48 @@ const OURS = {
   "footer.dir_up": "Move up: a pane, or the search list",
   "footer.flip_layout": "Flip the sidebar to the other side",
   "footer.worktree_new": "New worktree",
+  "agents-list.focus_sidebar": "Move the keyboard into the sidebar (and back)",
+  "agents-list.toggle_sidebar": "Collapse or expand the sidebar",
+  "agents-list.new_space": "New space",
+  "agents-list.close_space": "Close the active space",
+  "agents-list.worktree_new": "New worktree",
+  "agents-list.worktree_open": "Open worktree",
+  "agents-list.worktree_remove": "Remove worktree",
   "terminals-list.close_pane": "Close this pane",
   "terminals-list.close_tab": "Close this tab",
 };
+
+// Keys a panel only takes while it has the keyboard, so they are not in
+// keys.json (they would change meaning in a terminal). The sheet is where a
+// person looks them up, so they are listed here, under that panel.
+const PANEL_KEYS = [
+  { action: "agents-list.walk", label: "Sidebar: walk the list",
+    about: "Ctrl+J and Ctrl+K walk the sidebar's rows, as in the find sheet; Up and Down do the same.",
+    keys: ["ctrl-j", "ctrl-k", "up", "down"] },
+  { action: "agents-list.go", label: "Sidebar: go to the row",
+    about: "Enter opens the space, focuses the agent, or opens the checkout.",
+    keys: ["enter"] },
+  { action: "agents-list.close", label: "Sidebar: close, stop or remove the row",
+    about: "Ctrl+D asks first: closes a space, stops an agent, or removes a worktree.",
+    keys: ["ctrl-d"] },
+  { action: "agents-list.pin", label: "Sidebar: pin or unpin",
+    about: "Ctrl+P pins the row's space to the top, or unpins it.", keys: ["ctrl-p"] },
+  { action: "agents-list.rename", label: "Sidebar: rename the space",
+    about: "Ctrl+R renames the row's space.", keys: ["ctrl-r"] },
+  { action: "agents-list.new-worktree", label: "Sidebar: new worktree",
+    about: "Ctrl+A starts a worktree of the row's repo.", keys: ["ctrl-a"] },
+  { action: "agents-list.move", label: "Sidebar: move the space a row",
+    about: "Ctrl+Shift+J moves the space down, Ctrl+Shift+K up, and holding the key keeps it moving.",
+    keys: ["ctrl-shift-j", "ctrl-shift-k"] },
+  { action: "agents-list.new-space", label: "Sidebar: new space (plain N)",
+    about: "N starts a space in the current folder.", keys: ["n"] },
+  { action: "agents-list.open-worktree", label: "Sidebar: open worktree (plain G)",
+    about: "G opens one of the repo's checkouts as a space.", keys: ["g"] },
+  { action: "agents-list.fold", label: "Sidebar: fold or unfold (plain F)",
+    about: "F folds the space's or agent's children.", keys: ["f"] },
+  { action: "agents-list.leave", label: "Sidebar: leave the sidebar",
+    about: "Esc gives the keyboard back to the pane.", keys: ["escape"] },
+];
 
 // What a command is called when it has no description of its own.
 const said = (action) => {
@@ -118,6 +158,13 @@ export default class Keys extends View {
       const row = rows.get(command) ?? { action: command, label: short(said_, said(b.action)), about: about.get(command) ?? "", keys: [] };
       row.keys.push(b.keys);
       rows.set(command, row);
+    }
+    // The panels' own keys, listed under their panel.
+    for (const r of PANEL_KEYS) {
+      const line = `${r.label} ${r.about} ${r.keys.join(" ")} ${heading("mod:agents-list")}`;
+      if (q && !line.toLowerCase().includes(q)) continue;
+      if (!bySection.has("mod:agents-list")) bySection.set("mod:agents-list", new Map());
+      bySection.get("mod:agents-list").set(r.action, { action: r.action, label: r.label, about: r.about, keys: r.keys });
     }
     return [...bySection.entries()]
       .sort((a, b) => order(a[0]) - order(b[0]))

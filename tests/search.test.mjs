@@ -11,11 +11,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = process.env.SEARCH_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = readFileSync(join(root, "mods/search/main.js"), "utf8");
+const src = readFileSync(join(root, "mods/agents-list/palette.js"), "utf8");
 
 function method(name) {
   const at = src.indexOf(`  ${name}(`);
-  if (at < 0) throw new Error(`mods/search/main.js: no method ${name}`);
+  if (at < 0) throw new Error(`mods/agents-list/palette.js: no method ${name}`);
   const end = src.indexOf("\n  }", at) + 4;
   return src.slice(at, end).replace(`  ${name}(`, `function ${name}(`);
 }
@@ -38,6 +38,13 @@ function rows(world, q) {
     parent: world.parent ?? new Map(),
     checkoutParent: world.checkoutParent ?? new Map(),
     filter: q,
+    // The sheet hides a checkout the dialog has already taken away; that filter
+    // has its own home (tests/pinned.test.mjs), so here every row is live.
+    liveSpaces() { return world.spaces ?? []; },
+    liveTrees() { return this.worktrees; },
+    // The row's name: the sheet reads a worktree's checkout, but this world has
+    // none, so the space's own name is what every row shows.
+    spaceName(s) { return s.name; },
   };
   return search(() => world.spaces ?? [], () => world.agents ?? [], () => world.pins ?? [],
     () => null, (s) => s.folder, norm, base).call(self, q);

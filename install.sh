@@ -18,9 +18,9 @@ if [ ! -d "$home" ]; then
   exit 1
 fi
 
-# The ten mods of this bundle, by name: copying mods/ wholesale would take
+# The nine mods of this bundle, by name: copying mods/ wholesale would take
 # Herdr's own mods (and its scratch files) along with it.
-BUNDLE="agents-list terminals-list footer icons search shortcuts worktrees sidebar-menu handle pane-header"
+BUNDLE="agents-list terminals-list footer icons shortcuts worktrees sidebar-menu handle pane-header"
 
 mkdir -p "$home/layouts" "$home/mods" "$home/themes"
 cp "$here/layouts/workspace.json" "$home/layouts/"
@@ -37,27 +37,21 @@ for mod in $BUNDLE; do
 done
 [ -f "$here/themes/omarchy.json" ] && cp "$here/themes/omarchy.json" "$home/themes/"
 
-# The keys this layout expects. They live in the layout's own section, so Herdr's
-# layouts keep Alt+F and Ctrl+J/K for themselves.
+# The keys this layout expects, taken from this repo's own keys.json so the file a
+# person reads (and docs/bindings.md copies) is the file install.sh merges. They
+# live in the layout's section, so Herdr's other layouts keep Alt+F and Ctrl+J/K
+# for themselves.
 keys="$home/keys.json"
 if [ -f "$keys" ]; then
   cp "$keys" "$keys.bak.$(date +%s)"
 fi
 
 if command -v python3 >/dev/null 2>&1; then
-  python3 - "$keys" <<'PY'
+  python3 - "$keys" "$here/keys.json" <<'PY'
 import json, pathlib, sys
-path = pathlib.Path(sys.argv[1])
+path, ours_path = map(pathlib.Path, sys.argv[1:3])
 data = json.loads(path.read_text()) if path.exists() else {}
-ours = {
-    "alt-f": "mod.open:search",
-    "ctrl-j": "footer.dir_down",
-    "ctrl-k": "footer.dir_up",
-    "ctrl-shift-x": "terminals-list.close_pane",
-    "ctrl-shift-w": "terminals-list.close_tab",
-    "ctrl-shift-m": "footer.flip_layout",
-    "ctrl-shift-d": "footer.worktree_new",
-}
+ours = json.loads(ours_path.read_text()).get("layout:workspace", {})
 section = data.setdefault("layout:workspace", {})
 added = [k for k in ours if k not in section]
 section.update(ours)
@@ -65,18 +59,11 @@ path.write_text(json.dumps(data, indent=2) + "\n")
 print(f"keys.json: {len(added)} key(s) added to layout:workspace" if added else "keys.json: already has this layout's keys")
 PY
 else
-  cat <<'EOF'
-python3 was not found, so keys.json was not merged. Add this section by hand:
+  cat <<EOF
+python3 was not found, so keys.json was not merged. Add the "layout:workspace"
+section of this bundle's keys.json to $keys by hand:
 
-  "layout:workspace": {
-    "alt-f": "mod.open:search",
-    "ctrl-j": "footer.dir_down",
-    "ctrl-k": "footer.dir_up",
-    "ctrl-shift-x": "terminals-list.close_pane",
-    "ctrl-shift-w": "terminals-list.close_tab",
-    "ctrl-shift-m": "footer.flip_layout",
-    "ctrl-shift-d": "footer.worktree_new"
-  }
+  $here/keys.json
 EOF
 fi
 
@@ -88,5 +75,5 @@ Next:
   herdr-app do layout.switch --name workspace
   (or Ctrl+Shift+L to cycle layouts)
 
-The mods load on their own; "herdr-app check $home/mods/search" proves one.
+The mods load on their own; "herdr-app check $home/mods/agents-list" proves one.
 EOF

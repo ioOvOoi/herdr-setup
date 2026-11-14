@@ -12,10 +12,10 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = process.env.RAIL_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
-const src = readFileSync(join(root, "mods/agents-list/main.js"), "utf8");
+const src = readFileSync(join(root, "mods/agents-list/sidebar.js"), "utf8");
 
 const start = src.indexOf("const railShown =");
-if (start < 0) throw new Error("mods/agents-list/main.js: no railShown");
+if (start < 0) throw new Error("mods/agents-list/sidebar.js: no railShown");
 const end = src.indexOf("\n};", start) + 3;
 const railShown = new Function(`${src.slice(start, end)}; return railShown;`)();
 
@@ -39,7 +39,7 @@ for (const n of [10, 12]) {
 const all = railShown(cells(12), null);
 check("no limit leaves the agent rail whole", all.shown.length === 12 && all.beyond === 0);
 check("the rail lists places, not worktree checkouts",
-  /spaces\(\)\.filter\(\(sp\) => !isCheckout\(sp\)\)/.test(src));
+  /spaces\(\)\.filter\(\(sp\) => !this\.isWorktree\(sp\)/.test(src));
 
 if (failures) {
   console.error(`\n${failures} rail check(s) failed`);

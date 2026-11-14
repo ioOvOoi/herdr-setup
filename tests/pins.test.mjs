@@ -85,38 +85,48 @@ const check = (label, ok, extra = "") => {
 // --------------------------------------------------------------- worktrees
 // Removing a checkout drops pins that point inside it, and nothing else.
 {
-  const dropPins = new Function("shared", "setShared", "spaces", "console",
-    `return (${method("mods/worktrees/main.js", "dropPins")});`);
-  const run = (pins, live, space, path) => {
-    let now = pins;
-    dropPins(() => now, (_k, v) => { now = v; }, () => live, { log() {} })(space, path);
-    return now;
-  };
+  const pinsAfter = new Function("shared", "spaces",
+    `return (${method("mods/worktrees/main.js", "pinsAfter")});`);
+  const run = (pins, live, gone, path) => pinsAfter(() => copy(pins), () => live)(gone, path) ?? [];
   const W = "/home/me/.herdr/worktrees/repo/branch";
   const both = [{ id: "a", folder: "/repo" }, { id: "b", folder: "/repo" }, { id: "w", folder: W }];
 
-  let left = run(both, both, { id: "w", folder: W }, W);
+  let left = run(both, both, [{ id: "w", folder: W }], W);
   check("worktrees: removing a worktree keeps spaces pinned in the parent folder",
     left.length === 2 && left.every((p) => p.id !== "w"), JSON.stringify(left));
 
-  left = run([{ id: "a", folder: "/repo" }, { folder: `${W}/sub` }], [{ id: "a", folder: "/repo" }], null, W);
+  left = run([{ id: "a", folder: "/repo" }, { folder: `${W}/sub` }], [{ id: "a", folder: "/repo" }], [], W);
   check("worktrees: a pin pointing inside the removed checkout goes, with or without an id",
     left.length === 1 && left[0].id === "a", JSON.stringify(left));
 
   left = run([{ id: "a", folder: "/repo" }, { id: "b", folder: "/repo" }],
-    [{ id: "a", folder: "/repo" }, { id: "b", folder: "/repo" }], { id: "b", folder: "/repo" });
+    [{ id: "a", folder: "/repo" }, { id: "b", folder: "/repo" }], [{ id: "b", folder: "/repo" }]);
   check("worktrees: closing one space in a shared folder keeps the other's pin",
     left.length === 1 && left[0].id === "a", JSON.stringify(left));
+
+  // A removal drops the pin of every space it closed, but a pinned space the
+  // removal leaves behind (its folder is gone, the space is not) keeps its pin.
+  let pinsNow = [{ id: "p", folder: W }, { id: "w", folder: W }];
+  pinsNow = run(pinsNow, [{ id: "p", folder: W }, { id: "w", folder: W }], [{ id: "w", folder: W }]);
+  pinsNow = run(pinsNow, [{ id: "p", folder: W }], [], W);
+  check("worktrees: a pin whose space survives the removal stays",
+    pinsNow.length === 1 && pinsNow[0].id === "p", JSON.stringify(pinsNow));
+
+  // An old pin with no id, in a folder a closing space shares with another
+  // space: the other space is still there, so the pin stays.
+  left = run([{ folder: "/repo" }], [{ id: "a", folder: "/repo" }, { id: "b", folder: "/repo" }], [{ id: "b", folder: "/repo" }]);
+  check("worktrees: an old pin stays while another space still holds its folder",
+    left.length === 1, JSON.stringify(left));
 }
 
 // ---------------------------------------------------------------------- palette
 // A pin reads as pinned whether it has an id or not, and pinning never repeats
 // or swallows another space's pin.
 {
-  const pinKey = new Function("norm", `${top("mods/search/main.js", "pinKey")}; return pinKey;`)(norm);
-  const samePin = new Function("pinKey", `${top("mods/search/main.js", "samePin")}; return samePin;`)(pinKey);
-  const pinnedList = top("mods/search/main.js", "pinnedList");
-  const cls = ["spacePin", "setPin", "bindPins"].map((m) => method("mods/search/main.js", m)
+  const pinKey = new Function("norm", `${top("mods/agents-list/core.js", "pinKey")}; return pinKey;`)(norm);
+  const samePin = new Function("pinKey", `${top("mods/agents-list/core.js", "samePin")}; return samePin;`)(pinKey);
+  const pinnedList = top("mods/agents-list/core.js", "pinnedList");
+  const cls = ["spacePin", "setPin", "bindPins"].map((m) => method("mods/agents-list/core.js", m)
     .replace(`function ${m}`, m)).join("\n");
   const palette = new Function("shared", "setShared", "spaces", "norm", "pinnedList", "pinKey", "samePin",
     "place", "writePins", "spaceAt", `${pinnedList}
@@ -128,7 +138,7 @@ const check = (label, ok, extra = "") => {
   let live = [];
   // The real "is a space standing here", with place() reading the space's folder.
   const spaceAt = new Function("norm", "place", "spaces", "panes",
-    `${top("mods/search/main.js", "spaceAt")}; return spaceAt;`)(norm, (s) => s.folder, () => live, () => []);
+    `${top("mods/agents-list/core.js", "spaceAt")}; return spaceAt;`)(norm, (s) => s.folder, () => live, () => []);
   // The factory returns the class; the test needs one copy of it.
   const make = () => new (palette(() => copy(pins), (_k, v) => { pins = v; }, () => live, norm,
     () => copy(pins), pinKey, samePin, (s) => s.folder, (next) => { pins = next; }, spaceAt))();
@@ -192,7 +202,7 @@ const check = (label, ok, extra = "") => {
   // The row must promise what the click gives: an unnamed pin opens a space that
   // Herdr names after the folder, so that is what the row says.
   const pinLabel = new Function("base",
-    `${top("mods/search/main.js", "pinLabel")}; return pinLabel;`)((q) => (q ?? "").split("/").filter(Boolean).pop() ?? "");
+    `${top("mods/agents-list/core.js", "pinLabel")}; return pinLabel;`)((q) => (q ?? "").split("/").filter(Boolean).pop() ?? "");
   check("palette: an unnamed pin reads the name its folder gets",
     pinLabel({ name: "reel", named: false, folder: F }) === "shared",
     pinLabel({ name: "reel", named: false, folder: F }));

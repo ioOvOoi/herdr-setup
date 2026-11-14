@@ -16,11 +16,7 @@ function find(node, id) {
 // A theme colour with alpha, for tints that sit over whatever is beneath.
 const wash = (c, a = "14") => (/^#[0-9a-fA-F]{6}$/.test(c ?? "") ? c + a : c);
 
-// The agents header's label treatment: 9 px caps with a thin space between the
-// characters, so the two blocks of this column read as one surface.
-const spaced = (s) => [...String(s)].join("\u2009");
-
-// A count in a quiet pill, matching the agents header.
+// The agents header's count, and the label above each block.
 const countPill = (t, n) => div().flex_none().min_w(18).h(16).px(5).rounded(5)
   .bg(wash(t.foreground, "0a")).border(1).border_color(wash(t.foreground, "0c"))
   .text_size(9).font_medium().text_color(t.muted).flex().items_center().justify_center().child(String(n));
@@ -141,7 +137,7 @@ export default class Terminals extends View {
         .border_t(1).border_color(wash(t.border, "55"))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); openOverlay({ mod: "sidebar-menu", kind: "popup", width: 250 }); })
         .when(!compact, (el) => el.child(h_flex().flex_1().min_w(0).gap(7).items_center()
-          .child(div().flex_none().text_size(9).font_semibold().text_color(t.dim).child(spaced("TERMINALS")))
+          .child(div().flex_none().text_size(11.5).text_color(t.dim).child("Terminals"))
           .child(countPill(t, rows.length))))
         .when(compact && !narrow, (el) => el.child(div().flex_1()))
         .when(!narrow, (el) => el.child(tools)))

@@ -3,18 +3,38 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
-import { run, props, closeOverlay, theme, spaces, panes, agents, exec, home, setShared, shared } from "herdr";
+import { run, props, closeOverlay, theme, spaces, panes, agents, exec, home, setShared, shared, layout, window } from "herdr";
 
 const wash = (c, a = "14") => (/^#[0-9a-fA-F]{6}$/.test(c ?? "") ? c + a : c);
 
-// Pinned spaces are kept by the person, so nothing here closes one: not the
-// close dialog, not a worktree removal, not stopping its last agent. A pin names
-// its space by id, or — pins saved before ids — by its machine and folder.
+// A pin protects the space it names, and only that space: the close dialog
+// refuses it, but a worktree removal still deletes the checkout and stopping an
+// agent still ends the agent. A pinned space standing in a checkout that goes
+// stays behind (its folder is gone, the space is not). A pin names its space by
+// id, or — pins saved before ids — by its machine and folder.
 const norm = (p) => (p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
 const pinnedList = () => (Array.isArray(shared("spaces.pinned")) ? shared("spaces.pinned") : []);
 const isPinned = (s) => Boolean(s?.id) && pinnedList().some((p) => (p.id
   ? p.id === s.id
   : (p.machine ?? null) === (s.machine ?? null) && norm(p.folder) === norm(s.folder)));
+// Checkouts on their way out. One is hidden the moment the person confirms,
+// before git has done any work: removing a big checkout can take a while, and
+// the row must not sit there as if nothing happened. The sidebar runs the
+// removal and clears the entry when git is done; five minutes is only a safety
+// net for an entry left behind by a crash.
+const REMOVING = "worktree.removing";
+const removing = () => {
+  const list = shared(REMOVING);
+  if (!Array.isArray(list)) return [];
+  const since = Date.now() - 5 * 60_000;
+  return list.filter((r) => (r.at ?? 0) > since);
+};
+// Whether a layout shows a mod anywhere: a block nested in a column counts.
+function shownBy(node, mod) {
+  if (node?.content?.mod === mod) return true;
+  return (node?.children ?? []).some((child) => shownBy(child, mod));
+}
+
 const keycap = (t, label) => div().flex_none().h(18).px(5).rounded(4)
   .bg(wash(t.foreground, "0a")).border(1).border_color(wash(t.foreground, "0e"))
   .text_size(9.5).font_medium().text_color(t.dim).flex().items_center().child(label);
@@ -57,13 +77,17 @@ async function checkouts(repo, on) {
   return out.sort((a, b) => b.main - a.main || b.at - a.at);
 }
 
-// The space showing a checkout: its first terminal is in it (the deepest checkout wins).
+// The space showing a checkout: its first terminal is in it, or it was made in it
+// (a shell that cd'd out of its worktree is still the space standing there). The
+// deepest checkout wins.
 function spaceOf(path, all, on, spaceList, paneList) {
   const inside = (p, dir) => p === dir || p.startsWith(dir + "/");
   return spaceList.find((s) => (s.machine ?? null) === (on ?? null) && (() => {
     const at = place(s, paneList)?.replace(/\\/g, "/");
-    if (!at || !inside(at, path)) return false;
-    return !all.some((c) => c.path !== path && c.path.length > path.length && inside(at, c.path));
+    const made = (s.folder ?? "").replace(/\\/g, "/");
+    const here = at && inside(at, path) ? at : made && inside(made, path) ? made : null;
+    if (!here) return false;
+    return !all.some((c) => c.path !== path && c.path.length > path.length && inside(here, c.path));
   })());
 }
 
@@ -150,7 +174,9 @@ export default class Worktree extends View {
     this.error = "";
     this.repo = undefined; // undefined: looking, null: not in git
     this.dirty = false;
+    this.mods = 0; // submodules found, so a removal knows whether to force
     this.unpushed = [];
+    this.detail = ""; // a removal done here, in place of the dialog's own line
     this.handle = cx.focus_handle();
     if (!typing) this.handle.focus();
     cx.spawn(async (cx) => {
@@ -167,7 +193,9 @@ export default class Worktree extends View {
         const repo = await repoOf(this.folder, this.on);
         if (repo && props().action === "remove") {
           this.dirty = (await git(repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on)).out !== "";
-          this.unpushed = (await submodules(repo.top, this.on)).unpushed;
+          const sub = await submodules(repo.top, this.on);
+          this.mods = sub.mods.length;
+          this.unpushed = sub.unpushed;
         }
         if (repo && this.opening) this.list = await checkouts(repo, this.on);
         this.repo = repo;
@@ -182,14 +210,14 @@ export default class Worktree extends View {
     return spaces().find((s) => s.id === p.space) ?? (p.folder ? { folder: p.folder, machine: p.machine ?? null, name: "" } : undefined);
   }
 
-  // The space standing in this checkout, if any. props.space is a menu's hint,
-  // never proof: a space whose shell has cd'd away must not be closed for a
-  // checkout it no longer sits in.
-  spaceIn(top) {
+  // Every space standing in this checkout. props.space is a menu's hint, never
+  // proof: a space whose shell has cd'd away must not be closed for a checkout
+  // it no longer sits in. There can be more than one, and one may be pinned.
+  spacesIn(top) {
     const dir = norm(top);
-    if (!dir) return null;
+    if (!dir) return [];
     const inside = (p) => p === dir || p.startsWith(`${dir}/`);
-    return spaces().find((s) => (s.machine ?? null) === (this.on ?? null) && inside(norm(place(s)))) ?? null;
+    return spaces().filter((s) => (s.machine ?? null) === (this.on ?? null) && inside(norm(place(s))));
   }
 
   // Whether ending this agent would take its space with it: one tab, and that
@@ -213,6 +241,8 @@ export default class Worktree extends View {
     if (props()?.agent) return this.stop();
     if (props()?.action === "space") return this.removeSpace(cx);
     if (!this.repo) return;
+    // Asked and answered: a removal changes the list now and lets git follow.
+    if (props().action === "remove") return this.removeNow(cx);
     cx.spawn(async (cx) => this.work(cx));
   }
 
@@ -247,29 +277,97 @@ export default class Worktree extends View {
     this.close();
   }
 
-  // Pins of what is going away: this space's own pin, and (once git has removed
-  // the checkout) any pin pointing inside it, since no space can live there any
-  // more. A pin with another id is another space and stays, even in a shared
-  // folder; a pin with no id (saved before pins had ids) falls back to the folder
-  // and only goes when no other live space is left there.
+  // Pin list once the given spaces are gone and (with git done) the checkout at
+  // `path` is too. A pin whose space still exists stays, even in a folder that
+  // no longer does: that is how a pinned space survives a worktree removal. A
+  // pin with another id is another space and stays, even in a shared folder; a
+  // pin with no id (saved before pins had ids) falls back to the folder and only
+  // goes when no space is left there.
+  pinsAfter(gone, path) {
+    const pins = shared("spaces.pinned");
+    if (!Array.isArray(pins) || !pins.length) return null;
+    const norm = (p) => (p ?? "").replace(/\/+$/, "");
+    const key = (x) => `${x?.machine ?? ""}\u0000${norm(x?.folder)}`;
+    const live = spaces();
+    const ids = new Set(gone.filter(Boolean).map((s) => s.id).filter(Boolean));
+    const top = path ? norm(path) : null;
+    const inside = (p) => Boolean(top) && (norm(p.folder) === top || norm(p.folder).startsWith(`${top}/`));
+    // A space that is going does not keep its own pin alive.
+    const survives = (p) => (p.id
+      ? live.some((x) => x.id === p.id && !ids.has(x.id))
+      : live.some((x) => key(x) === key(p) && !ids.has(x.id)));
+    return pins.filter((p) => {
+      if (p.id && ids.has(p.id)) return false;
+      if (inside(p)) return survives(p);
+      if (p.id) return true;
+      return !gone.some((s) => key(p) === key(s) && !live.some((x) => !ids.has(x.id) && key(x) === key(s)));
+    });
+  }
+
+  // The pins of what is going away, applied. See pinsAfter.
   dropPins(space, path) {
     const pins = shared("spaces.pinned");
     if (!Array.isArray(pins) || !pins.length) return;
-    const norm = (p) => (p ?? "").replace(/\/+$/, "");
-    const key = (x) => `${x?.machine ?? ""}\u0000${norm(x?.folder)}`;
-    const top = path ? norm(path) : null;
-    const inside = (p) => Boolean(top) && (norm(p.folder) === top || norm(p.folder).startsWith(`${top}/`));
-    const elsewhere = space ? spaces().some((x) => x.id !== space.id && key(x) === key(space)) : false;
-    const next = pins.filter((p) => {
-      if (space && p.id === space.id) return false;
-      if (inside(p)) return false;
-      if (p.id) return true;
-      return !(space && !elsewhere && key(p) === key(space));
-    });
-    if (next.length !== pins.length) {
+    const next = this.pinsAfter(space ? [space] : [], path);
+    if (next && next.length !== pins.length) {
       console.log(`worktrees: dropped ${pins.length - next.length} pin(s) (${pins.length} -> ${next.length})`);
       setShared("spaces.pinned", next);
     }
+  }
+
+  // Confirmed: the checkout leaves the list at once, and git runs behind it. The
+  // job goes to the sidebar, which stays when this dialog closes — a dialog's
+  // tasks end with it, so doing git here would hold the dialog open for as long
+  // as the removal took. What was checked here is what is applied: the spaces to
+  // close, whether git needs --force, and the pins that survive.
+  removeNow(cx) {
+    const r = this.repo;
+    if (!r?.linked) return; // the dialog never offers this
+    const closing = this.spacesIn(r.top).filter((s) => !isPinned(s));
+    const at = Date.now();
+    const job = {
+      at,
+      top: r.top,
+      main: r.main,
+      on: this.on ?? null,
+      force: this.dirty || this.mods > 0,
+      spaces: closing.map((s) => s.id).filter(Boolean),
+      pins: this.pinsAfter(closing, r.top),
+    };
+    setShared(REMOVING, [...removing(), { path: r.top, machine: this.on ?? null, at }]);
+    // A layout without the sidebar has nobody to take the job, so this dialog
+    // stays and runs it. The checkout is hidden either way.
+    if (!shownBy(layout(), "agents-list")) return cx.spawn(async (cx) => this.workJob(job, cx));
+    setShared("worktree.job", job);
+    this.close();
+  }
+
+  // The removal, done here: only when there is no panel to hand it to. Windows
+  // closes the spaces first, because a live shell keeps the folder busy there;
+  // everywhere else git runs first, so a failure leaves them exactly as they were.
+  async workJob(job, cx) {
+    this.busy = true;
+    this.detail = `Removing ${tilde(job.top, this.userHome ?? "")}…`;
+    cx.notify();
+    const closeSpaces = () => {
+      for (const id of job.spaces ?? []) run("space.close", { id, confirmed: true });
+    };
+    const windows = window()?.platform === "windows";
+    if (windows) closeSpaces();
+    const r = await git(job.main, ["worktree", "remove", ...(job.force ? ["--force"] : []), job.top], job.on, 600_000);
+    if (!r.ok) {
+      this.busy = false;
+      this.detail = "";
+      this.error = r.err || "git worktree remove failed.";
+      setShared(REMOVING, removing().filter((x) => !(norm(x.path) === norm(job.top) && (x.machine ?? null) === job.on)));
+      cx.notify();
+      return;
+    }
+    if (!windows) closeSpaces();
+    if (Array.isArray(job.pins)) setShared("spaces.pinned", job.pins);
+    setShared(REMOVING, removing().filter((x) => !(norm(x.path) === norm(job.top) && (x.machine ?? null) === job.on)));
+    this.busy = false;
+    this.close();
   }
 
   async work(cx) {
@@ -277,7 +375,7 @@ export default class Worktree extends View {
     this.busy = true;
     this.error = "";
     cx.notify();
-    try { this.error = props().action === "remove" ? await this.remove() : await this.create(); }
+    try { this.error = await this.create(); }
     catch (error) { this.error = String(error); }
     this.busy = false;
     if (!this.error) this.close();
@@ -308,37 +406,14 @@ export default class Worktree extends View {
     if (!c) return;
     this.close();
     const s = spaceOf(c.path, this.list, this.on, spaces(), panes());
-    if (!s) return run("space.new", { folder: c.path, machine: this.on });
+    // Name the space after the checkout: Herdr names an unnamed space after its
+    // shell's live folder, so a `cd` would rename the worktree out from under it.
+    const name = c.branch ?? c.path.split("/").pop();
+    if (!s) return run("space.new", { folder: c.path, machine: this.on, name });
     // A space with no terminal left (no tabs, or only mod panes) opens a shell.
     const tabs = new Set((s.tabs ?? []).map((t2) => t2.id));
     run("space.select", { id: s.id });
     if (!panes().some((p) => p.terminal && tabs.has(p.tab))) run("tab.new", { space: s.id });
-  }
-
-  async remove() {
-    const s = this.spaceIn(this.repo.top);
-    // A pinned space never closes, and git cannot remove a checkout a live shell
-    // is sitting in: say so rather than half-doing it.
-    if (s && isPinned(s)) return `Pinned space ${s.name} is in this checkout. Unpin and close it first, or remove the checkout outside Herdr.`;
-    const status = await git(this.repo.top, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on);
-    if (!status.ok) return status.err || "git status failed.";
-    // git refuses a worktree with submodules unless forced, because their
-    // history goes with it. The popup already showed what's at risk; only
-    // risk that appeared since it opened gets one more warning.
-    const { mods, unpushed } = await submodules(this.repo.top, this.on);
-    const changed = (status.out && !this.dirty) || unpushed.some((name) => !this.unpushed.includes(name));
-    this.dirty ||= status.out !== "";
-    this.unpushed = [...new Set([...this.unpushed, ...unpushed])];
-    if (changed) return "It changed since this opened. Enter again removes it anyway.";
-    // Terminals first: a shell sitting in the folder keeps it busy on Windows.
-    // Only close a space that is this checkout's own; an unopened worktree has none.
-    if (s?.id) { this.dropPins(s); run("space.close", { id: s.id, confirmed: true }); }
-    const force = this.dirty || mods.length > 0;
-    const r = await git(this.repo.main, ["worktree", "remove", ...(force ? ["--force"] : []), this.repo.top], this.on, 600_000);
-    if (!r.ok) return r.err || "git worktree remove failed.";
-    // The checkout is gone, so a pin pointing at it would only offer to rebuild it.
-    this.dropPins(s, this.repo.top);
-    return "";
   }
 
   // true when the dialog took the key, so it doesn't also reach the panel below.
@@ -479,23 +554,29 @@ export default class Worktree extends View {
     const closeSpace = props()?.action === "space";
     const s = this.space();
     const r = this.repo;
-    // A removal ends the space standing in that checkout, and only that one.
-    // props.space says which space a menu meant; it is not proof that a space
-    // still lives there, and the text must not claim one if none does.
-    const standing = remove && r?.linked ? this.spaceIn(r.top) : null;
-    const pinnedSpace = closeSpace ? (isPinned(s) ? s : null) : (isPinned(standing) ? standing : null);
+    // A removal ends the spaces standing in that checkout, and only those, and
+    // never a pinned one. props.space says which space a menu meant; it is not
+    // proof that a space still lives there, and the text must not claim one if
+    // none does.
+    const inside = remove && r?.linked ? this.spacesIn(r.top) : [];
+    const closing = inside.filter((x) => !isPinned(x));
+    const staying = inside.filter((x) => isPinned(x));
+    const pinnedSpace = closeSpace && isPinned(s) ? s : null;
+    const spacesNamed = (list) => (list.length === 1
+      ? `the space ${list[0].name}`
+      : `the spaces ${list.slice(0, -1).map((x) => x.name).join(", ")} and ${list.at(-1).name}`);
     // An unopened checkout has no space: name it after its folder.
     const name = s?.name || (r ? r.top.replace(/[\\/]+$/, "").split(/[\\/]/).pop() : "");
-    const title = pinnedSpace
-      ? closeSpace ? `Space ${name} is pinned` : `Pinned space ${pinnedSpace.name} is in this checkout`
+    const title = pinnedSpace ? `Space ${name} is pinned`
       : closeSpace ? `Remove space ${name}?`
       : remove ? `Remove worktree ${name}?`
       : `New worktree${r ? ` of ${r.name}` : ""}`;
+    const stayingNote = staying.length
+      ? ` Pinned ${staying.length === 1 ? `space ${staying[0].name} stays` : `spaces ${staying.map((x) => x.name).join(", ")} stay`}: the checkout goes, the space does not.`
+      : "";
     const detail =
       pinnedSpace
-        ? closeSpace
-          ? "Pinned spaces are never closed — not when you leave them, not when their folder goes. Unpin it first, then close it."
-          : `Removing this checkout would end ${pinnedSpace.name}, and a pinned space never closes. Unpin and close that space first, or remove the checkout outside Herdr.`
+        ? "Pinned spaces are never closed — not when you leave them, not when their folder goes. Unpin it first, then close it."
         : closeSpace
         ? "Ends its terminals and closes the space. The folder and branches stay."
         : r === undefined
@@ -505,7 +586,7 @@ export default class Worktree extends View {
           : remove
             ? !r.linked
               ? "This is the repository's main checkout, not a worktree."
-              : `${standing ? `Closes the space ${standing.name} and deletes` : "Deletes"} ${tilde(r.top, this.userHome)}. The branch stays.`
+              : `${closing.length ? `Closes ${spacesNamed(closing)} and deletes` : "Deletes"} ${tilde(r.top, this.userHome)}. The branch stays.${stayingNote}`
             : `A new checkout in ${tilde(ROOT(this.userHome), this.userHome)}/${r.name}/. An existing branch is checked out; a new name starts from here.`;
     const blocked = Boolean(pinnedSpace) || (!closeSpace && (!r || (remove && !r.linked)));
     const warn = remove || Boolean(pinnedSpace);
@@ -523,7 +604,7 @@ export default class Worktree extends View {
           .bg(warn ? wash(t.blocked, "16") : wash(t.accent, "16")).flex().items_center().justify_center()
           .child(svg("mods/workspace-chrome/branch.svg").size(14).text_color(warn ? t.blocked : t.accent)))
         .child(div().flex_1().min_w(0).truncate().font_semibold().text_size(13.5).text_color(t.foreground).child(title)))
-      .child(div().text_size(11.5).text_color(t.muted).child(detail))
+      .child(div().text_size(11.5).text_color(t.muted).child(this.detail || detail))
       .when(remove && this.dirty, (el) => el.child(div().px(8).py(6).rounded(6).bg(wash(t.blocked, "12")).text_size(10.5).text_color(t.blocked).child("It has uncommitted changes: they will be lost.")))
       .when(remove && this.unpushed.length > 0, (el) => el.child(div().px(8).py(6).rounded(6).bg(wash(t.blocked, "12")).text_size(10.5).text_color(t.blocked).child(`Submodule ${this.unpushed.join(", ")} has commits that aren't pushed anywhere: they will be lost.`)))
       .when(!remove && !closeSpace && !blocked, (el) =>

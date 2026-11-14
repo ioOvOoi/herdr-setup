@@ -48,7 +48,7 @@
     "ctrl-shift-b": "layout.toggle:sidebar",
     "ctrl-shift-n": "space.new",
     "ctrl-shift-t": "tab.new",
-    "alt-f": "mod.open:search",
+    "alt-f": "mod.open:agents-list",
     "ctrl-shift-p": "app.palette",
     "ctrl-,": "app.settings",
     "ctrl-shift-o": "pane.split:right",
@@ -67,10 +67,18 @@
     "ctrl-q": "overlay.close"
   },
   "layout:workspace": {
+    "ctrl-j": "footer.dir_down",
+    "ctrl-k": "footer.dir_up",
     "ctrl-shift-x": "terminals-list.close_pane",
     "ctrl-shift-w": "terminals-list.close_tab",
     "ctrl-shift-m": "footer.flip_layout",
-    "ctrl-shift-d": "footer.worktree_new"
+    "ctrl-shift-d": "footer.worktree_new",
+    "alt-b": "agents-list.focus_sidebar",
+    "alt-shift-n": "agents-list.new_space",
+    "alt-shift-q": "agents-list.close_space",
+    "alt-w": "agents-list.worktree_new",
+    "alt-shift-w": "agents-list.worktree_open",
+    "alt-shift-r": "agents-list.worktree_remove"
   },
   "terminal": {
     "ctrl-backspace": "send:\u0017",

@@ -22,7 +22,10 @@ the window, and a narrow sidebar folds into a rail of icons.
 - **Panes as cards** — 10 px radius, 8 px between them, an accent border on the
   focused pane, and no header eating space.
 - **Worktrees from the sidebar.** New, open and remove in dialogs. A pinned
-  space never closes, and stopping an agent leaves a shell in its place.
+  space never closes (its worktrees still can), and stopping an agent leaves a
+  shell in its place. The sidebar keeps the keyboard through its dialogs, and a
+  removal is optimistic: the checkout leaves the list on the press while git
+  works behind it, and only a failure brings it back, with the reason.
 - **A rail when narrow.** Below 160 px the sidebar becomes a column of state
   dots and icons; past nine spaces an ellipsis expands it again.
 - **A searchable keys sheet** — every shortcut in one list, one row per command.
@@ -42,36 +45,41 @@ cd herdr-setup
 herdr-app do layout.switch --name workspace
 ```
 
-`install.sh` copies the layout, its ten mods and its theme into
+`install.sh` copies the layout, its nine mods and its theme into
 `~/.config/herdr-app`, and merges the layout's keys into `keys.json` (the old
 file is kept as `keys.json.bak.<time>`). It touches nothing else. Set
 `HERDR_APP_HOME` to install elsewhere.
 
 To install by hand, copy `layouts/workspace.json` and `layouts/workspace.svg`
-into `layouts/`, the ten mod folders listed below into `mods/`, and
-`themes/omarchy.json` into `themes/`, then add the keys below.
+into `layouts/`, the nine mod folders listed below into `mods/`, and
+`themes/omarchy.json` into `themes/`, then merge the `layout:workspace` section
+of this repository's `keys.json` into yours.
 
 ## Keys
 
-These live in the layout's section, so Herdr's other layouts keep `Alt+F` and
-`Ctrl+J`/`Ctrl+K` for themselves:
+`keys.json` is the file: Herdr's own keys, this layout's section
+(`layout:workspace`) and the terminal's. `install.sh` merges this layout's
+section into yours and keeps everything else. Herdr's other layouts keep
+`Ctrl+J`/`Ctrl+K` for themselves.
 
-```json
-{
-  "layout:workspace": {
-    "alt-f": "mod.open:search",
-    "ctrl-j": "footer.dir_down",
-    "ctrl-k": "footer.dir_up",
-    "ctrl-shift-x": "terminals-list.close_pane",
-    "ctrl-shift-w": "terminals-list.close_tab",
-    "ctrl-shift-m": "footer.flip_layout",
-    "ctrl-shift-d": "footer.worktree_new"
-  }
-}
-```
+Every binding, with what it does, is in
+[docs/bindings.md](docs/bindings.md) — the page is checked against `keys.json`,
+so the two cannot drift.
 
 `Ctrl+Shift+B` (Herdr's own key) still toggles the sidebar. With it hidden, a
-small tab floats at the window edge to bring it back.
+small tab floats at the window edge to bring it back. `Alt+B` puts the keyboard
+in the sidebar, and `Alt+Shift+N`, `Alt+W`, `Alt+Shift+W`, `Alt+Shift+R` and
+`Alt+Shift+Q` run its space and worktree actions from anywhere in the layout.
+
+Inside the sidebar the keys are the find sheet's own: `Ctrl+J`/`Ctrl+K` walk
+(arrows too), `Enter` goes there, `Ctrl+D` closes the space, stops the agent or
+removes the worktree, `Ctrl+P` pins, `Ctrl+R` renames, `Ctrl+A` starts a
+worktree, `Ctrl+Shift+J`/`Ctrl+Shift+K` move the space a row (held, they keep
+moving), and `Esc` leaves. `N`, `G` and `F` remain for a new space, opening a
+worktree and folding. They are listed in the keys sheet (the keyboard icon in
+the footer) and in [docs/bindings.md](docs/bindings.md). Making or closing a
+space from the list keeps the keyboard in the list, so adding a space does not
+start typing in its terminal.
 
 ## Repository layout
 
@@ -82,6 +90,7 @@ preview.png               a screenshot of the layout
 mods/<name>/              main.js, mod.json, and the icons that mod draws
 themes/omarchy.json       the palette this layout is drawn for
 keys.json                 a working example key file
+docs/bindings.md          every binding, and that file, ready to copy
 tests/                    plain node, no Herdr needed
 install.sh                copies it all into a Herdr home, merging keys
 RECIPE.md                 the brief to rebuild this layout from scratch
@@ -93,15 +102,14 @@ socket) out of it.
 
 ## Mods
 
-The layout ships ten mods as parts of itself, not separate downloads:
+The layout ships nine mods as parts of itself, not separate downloads:
 
 | Mod | What it is |
 |---|---|
-| `agents-list` | The AGENTS list: status groups, pins, sub-agents, sort, search, hide. |
+| `agents-list` | The sidebar: spaces, worktrees, the AGENTS list, pins, sort; and the `Alt+F` find sheet, which is the same logic drawn as a sheet (`core.js` is shared). |
 | `terminals-list` | The TERMINALS list for the active space, plus Files / Changes / new terminal. |
 | `footer` | The footer strip; `Ctrl+J`/`Ctrl+K`, layout flip, new worktree, closing dead spaces. |
 | `icons` | Icons shared by the other mods, and an optional top bar. |
-| `search` | The `Alt+F` search sheet. |
 | `shortcuts` | The searchable shortcut sheet. |
 | `worktrees` | New / open / remove worktree dialogs and stop confirmations. |
 | `sidebar-menu` | Right-click the sidebar: move it to the other side, or hide it. |
@@ -109,8 +117,10 @@ The layout ships ten mods as parts of itself, not separate downloads:
 | `pane-header` | An optional pane header. **Unused by this layout.** |
 
 Each folder is self-contained and can be copied into another Herdr home. The
-`search` sheet stands alone; `agents-list`, `terminals-list` and `footer` also
-open dialogs from `worktrees`, so take that with them. Some icons are borrowed
+sidebar and its `Alt+F` find sheet are one mod (`agents-list`): Herdr only lets a
+mod import its own folder, so the logic they share lives in `core.js`, the two
+drawings in `sidebar.js` and `palette.js`. `agents-list`, `terminals-list` and
+`footer` also open dialogs from `worktrees`, so take that with them. Some icons are borrowed
 from Herdr's own mod folders (`workspace-chrome`, `files`, `changes`, `pane`,
 `tabs`) and are referenced, never copied.
 
@@ -119,7 +129,7 @@ from Herdr's own mod folders (`workspace-chrome`, `files`, `changes`, `pane`,
 Load each mod after any edit:
 
 ```sh
-herdr-app check mods/search   # once per mod
+herdr-app check mods/agents-list   # once per mod
 ```
 
 The tests run the mods' own functions with stubs, so no Herdr is needed:

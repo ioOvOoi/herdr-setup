@@ -1,9 +1,14 @@
 // Every `this.foo(` in a mod must name a method that mod defines, and no method
-// may be defined twice (the second body silently wins).
+// may be defined twice in one file (the second body silently wins).
 //
 // A rename that misses one call site is invisible until someone presses that key:
 // `this.dropPin()` kept its old name after the method became `dropPins()`, and the
 // worktree dialog answered "this.dropPin is not a function" when it was used.
+//
+// A mod is one program, even when it is several files: the sidebar and the find
+// sheet are one mod, and `this.pinRow` is defined in core.js for both of them.
+// So a call is checked against every `.js` file the mod ships, while a duplicate
+// is only a problem inside the file that defines it.
 //
 //   node tests/methods.test.mjs
 //   MODS=/some/other/mods node tests/methods.test.mjs
@@ -14,35 +19,38 @@ import { fileURLToPath } from "node:url";
 
 const mods = process.env.MODS ?? join(dirname(fileURLToPath(import.meta.url)), "..", "mods");
 
+const sources = (dir) => readdirSync(dir)
+  .filter((f) => f.endsWith(".js") && statSync(join(dir, f)).isFile())
+  .map((f) => ({ file: f, src: readFileSync(join(dir, f), "utf8") }));
+
 const files = [];
 for (const name of readdirSync(mods)) {
   const dir = join(mods, name);
   if (!statSync(dir).isDirectory()) continue;
-  try {
-    readFileSync(join(dir, "main.js"));
-    files.push({ name, src: readFileSync(join(dir, "main.js"), "utf8") });
-  } catch {
-    // a mod without main.js (assets only) has nothing to check
-  }
+  const list = sources(dir);
+  // a mod without main.js (assets only) has nothing to check
+  if (list.some((f) => f.file === "main.js")) files.push({ name, list });
 }
 
+const keywords = new Set(["for", "if", "while", "switch", "catch", "return", "else", "try", "do", "function", "with"]);
+const methods = (src) => [...src.matchAll(/^ {2}(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
+const calls = (src) => [...src.matchAll(/this\.([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]);
+
 let bad = 0;
-for (const { name, src } of files) {
-  // `  method(` and `  async method(` — the class body's own shape in these mods.
-  const names = [...src.matchAll(/^ {2}(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
-  const defined = new Set(names);
-  // One name, one body: a second definition silently replaces the first, so the
-  // dead copy still reads as live code (askStop was written twice, byte for byte).
-  const counts = new Map();
-  for (const method of names) counts.set(method, (counts.get(method) ?? 0) + 1);
-  const used = new Set([...src.matchAll(/this\.([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]));
-  // A call written at two spaces reads like a definition (`run(...)` at the top
-  // of a method body), so only names this mod calls as `this.name(` are checked.
-  const keywords = new Set(["for", "if", "while", "switch", "catch", "return", "else", "try", "do", "function", "with"]);
-  for (const [method, n] of counts) {
-    if (n > 1 && !keywords.has(method) && used.has(method)) {
-      console.log(`${name}: ${method}() is defined ${n} times`);
-      bad++;
+for (const { name, list } of files) {
+  const defined = new Set(list.flatMap((f) => methods(f.src)));
+  const used = new Set(list.flatMap((f) => calls(f.src)));
+  for (const { file, src } of list) {
+    // One name, one body in a file: a second definition silently replaces the
+    // first, so the dead copy still reads as live code (askStop was written
+    // twice, byte for byte).
+    const counts = new Map();
+    for (const method of methods(src)) counts.set(method, (counts.get(method) ?? 0) + 1);
+    for (const [method, n] of counts) {
+      if (n > 1 && !keywords.has(method) && used.has(method)) {
+        console.log(`${name}/${file}: ${method}() is defined ${n} times`);
+        bad++;
+      }
     }
   }
   for (const method of used) {
@@ -52,5 +60,5 @@ for (const { name, src } of files) {
   }
 }
 
-console.log(bad ? `\n${bad} method problem(s)` : `every this.* call is defined in ${files.length} mods, each method once`);
+console.log(bad ? `\n${bad} method problem(s)` : `every this.* call is defined in ${files.length} mods, each method once per file`);
 process.exit(bad ? 1 : 0);

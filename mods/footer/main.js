@@ -66,8 +66,9 @@ function newWorktree() {
 export default class Status extends View {
   init(_props, cx) {
     this.gone = new Map();
-    // Ctrl+J/K move panes (or the search panel), Ctrl+Shift+M flips the layout,
-    // Ctrl+Shift+D makes a worktree: keys.json points those here.
+    // Ctrl+J/K move panes (or the search panel, or the sidebar's rows),
+    // Ctrl+Shift+M flips the layout, Ctrl+Shift+D makes a worktree: keys.json
+    // points those here.
     cx.spawn(async (cx) => {
       let moves = 0;
       for (;;) {
@@ -75,7 +76,11 @@ export default class Status extends View {
           const c = await nextCommand();
           if (c === "dir_down" || c === "dir_up") {
             const direction = c === "dir_down" ? "down" : "up";
+            // Ctrl+J/K is the app's binding, so the panel with the keyboard cannot
+            // see it: it says so, and the walk comes back to it here. Same for
+            // the find sheet.
             if (shared("search.open")) setShared("search.move", `${direction}:${++moves}`);
+            else if (shared("sidebar.kb")) setShared("sidebar.move", `${direction}:${++moves}`);
             else run("pane.go", { direction });
           } else if (c === "flip_layout") flipLayout();
           else if (c === "worktree_new") newWorktree();

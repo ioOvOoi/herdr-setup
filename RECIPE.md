@@ -23,7 +23,8 @@ window edge is its edge), not resizable by its edge — it collapses instead.
   optional space chip, the time since its state changed (`<1m`, `2m`, `1h`,
   `3d`) and a trailing status mark.
 - **`TERMINALS`** (bottom, 0.85 weight, min 90 px): a 38 px header with
-  `TERMINALS`, a count pill, Files and Changes buttons, a 1 px divider and a `+`.
+  `Terminals` (11.5 px, the default UI font), a count pill, Files and Changes
+  buttons, a 1 px divider and a `+`.
   Rows are 28 px: a 20 px tile (the agent's own program mark; a terminal keeps
   the app's terminal icon), the title at `12.5 px` (medium when focused), the
   tab's name in a `9.5 px` chip when the space has more than one tab, and a 6 px
@@ -91,20 +92,51 @@ not, in the sidebar and in the sheet), and neither the worktree's space menu nor
 the sheet's `Ctrl+P` offers to pin one — a pin keeps a place, and a checkout is
 not a place of its own.
 
-**A pinned space is never closed, and nothing else goes with it.** The pin is the
-promise: the sidebar's two-second sweep skips a pinned space even when its folder
-is gone (it stays in the list, named `(deleted)`, with one toast), the space menu
-does not offer "Close space" while it is pinned, the sheet answers `Ctrl+D` with a
-line instead of a dialog, and a worktree removal refuses with the reason. A
-removal only names a space when that checkout is the one the space stands in: an
-unopened checkout's dialog says "Deletes … The branch stays." and never mentions
-closing anything. Stopping an agent never takes its space either — where the agent
-is the only terminal in the space, a shell opens there first, and the dialog says
-so.
+**A pinned space is never closed, and nothing else is protected with it.** The pin
+is the promise: the sidebar's two-second sweep skips a pinned space even when its
+folder is gone (it stays in the list, named `(deleted)`, with one toast), the space
+menu does not offer "Close space" while it is pinned, and the sheet answers `Ctrl+D`
+with a line instead of a dialog. A pin covers only that space: its worktrees stay
+removable — the sheet's `Ctrl+D` and the sidebar's menu and `x` still ask and then
+delete the checkout, closing only the spaces that are not pinned, and a pinned space
+standing in that checkout stays behind (its folder goes, the space does not) — and
+its agents still stop. A removal only names a space when that checkout is the one
+the space stands in: an unopened checkout's dialog says "Deletes … The branch
+stays." and never mentions closing anything. A removal is optimistic — the press
+is the answer: the checkout leaves the list at once and the dialog closes, then
+git runs behind it (the sidebar does the work, because a dialog's tasks end with
+it) and the spaces close when git has actually removed the folder. Only a failure
+brings the row back, with a toast saying why, and closes no space. Stopping an
+agent never takes its space either — where the agent is the
+only terminal in the space, a shell opens there first, and the dialog says so.
+A dialog opened from the sidebar hands the keyboard back to the list when it
+closes, so a removal never drops the person into the terminal behind it.
 
-Each section ribbon is a tracked 9 px label, its count, a
-hairline, and the fold chevron; a folded space says how many rows it hides and
-how urgent the most urgent of them is. Right-click opens the space menu (rename,
+The sidebar's keys are the find sheet's own, so one map works in both places:
+`Ctrl+J`/`Ctrl+K` walk the rows (Up/Down too), `Enter` goes there, `Ctrl+D`
+closes the space / stops the agent / removes the worktree, `Ctrl+P` pins,
+`Ctrl+R` renames, `Ctrl+A` starts a worktree of the row's repo, and
+`Ctrl+Shift+J`/`Ctrl+Shift+K` move the space a row — held down, they keep
+stepping, at the same 70 ms pace as the sheet, aimed past the row they just
+left so two quick presses do not aim at the same neighbour. `Esc` leaves, and
+`N`, `G`, `F` stay for a new space, opening a worktree and folding. Walking with
+`Ctrl+J`/`K` goes through the footer like the sheet's: the app's keymap takes
+those keys, so the sidebar says `shared("sidebar.kb")` while it holds the
+keyboard and the footer answers with `shared("sidebar.move")`, polled only then.
+The sheet lists all of these under "Sidebar · with its keyboard"; the
+sidebar itself draws no hint row. Adding or removing a space from the list keeps
+the keyboard there: the sidebar re-claims its focus handle as the app settles
+(40/140/340/700 ms), and a removal that closes spaces only after git re-claims
+only if the person is still in the list. A press anywhere outside the panel ends
+keyboard mode — even on the footer or the background, where the app leaves the
+focus where it was — and a press inside brings it back. Opening a row does not
+pull focus back to the pane that was current: the action's own focus stands.
+
+Each section ribbon is an 11 px medium label in the default UI font, title
+case ("Pinned", "Needs you"), its count, a hairline, and the fold chevron; a
+folded space says how many rows it hides and how urgent the most urgent of them
+is. The panel's own heading is "Spaces" (or "Agents") at 11.5 px, the way
+Herdr's default lists read. Right-click opens the space menu (rename,
 new/open/remove worktree, close, new space), and an unopened checkout has its own
 menu (open it, remove it). Drag reorders inside a section; the chevron folds.
 With more than one machine the list is grouped by it — this computer first, then
@@ -172,12 +204,13 @@ and offers to make one.
   blocked, and the matched characters are drawn semibold in the row. `↑`/`↓` to
   move, `Enter` to go (space → select it, agent → focus it, worktree → open it,
   pin → open a space there, or go to the space already there).
-- **`Ctrl+J`/`Ctrl+K` are shared with pane movement, and separated by the sheet.**
-  `keys.json` binds them to `footer.dir_down`/`dir_up`, which moves pane
-  focus when the sheet is shut and hands them to the sheet when it is open
-  (`shared("search.open")` → `shared("search.move")`, which the sheet polls every
-  70 ms). The sheet also handles `ctrl+j`/`ctrl+k` itself when nothing binds them,
-  so a lifted-out search sheet keeps them. One press is one row, never two. `Ctrl+P` pins or unpins the row, `Ctrl+R` renames the
+- **`Ctrl+J`/`Ctrl+K` are shared with pane movement, and separated by the panel.**
+  `keys.json` (under `layout:workspace`) binds them to `footer.dir_down`/`dir_up`,
+  which moves pane focus when no panel is open, hands them to the find sheet when
+  it is (`shared("search.open")` → `shared("search.move")`), and to the sidebar
+  when its keyboard is there (`shared("sidebar.kb")` → `shared("sidebar.move")`).
+  Both panels poll every 70 ms. Each also handles `ctrl+j`/`ctrl+k` itself in case
+  nothing binds them. One press is one row, never two. `Ctrl+P` pins or unpins the row, `Ctrl+R` renames the
   space, `Ctrl+A` makes a worktree for the selection, `Ctrl+Shift+J`/`K` slide the
   highlighted space through the order, `Ctrl+Backspace` deletes a word, `Esc` closes.
 - **A hit comes with what it belongs to, all the way up.** A matched branch (a
@@ -229,7 +262,8 @@ row root                     background canvas · theme {light,dark: omarchy}
 ├─ column sidebar            268 px · min 44 · max 480 · background chrome ·
 │  │                         resizable false
 │  ├─ column sidebar-lists
-│  │  ├─ block agents        mod agents-list · weight 2.146 · min 90
+│  │  ├─ block agents        mod agents-list · props {sidebar:true} ·
+│  │  │                      weight 2.146 · min 90
 │  │  └─ block terminals     mod terminals-list · weight 0.854 · min 90
 │  └─ block sidebar-footer   mod footer · 32 px · window_drag
 └─ column work               resizable false
@@ -249,16 +283,23 @@ Mods, all `"place": "none"` (the layout decides where they draw):
 
 | Mod | Props | What it does |
 |---|---|---|
-| `agents-list` | — | The AGENTS list. `agents()`, `setAgentOrder`, `terminal.pin`, `agent.focus`, `run("mod.open"…)`; keeps agent state in `localStorage` (`changed`) and the sort in shared `agents.sort`. |
+| `agents-list` | `{sidebar:true}`; no props: the `Alt+F` sheet; `{menu}` / `{sortMenu}`: its popups | The sidebar and the find sheet, one mod. `core.js` is the logic both use (spaces, pins, removals, worktrees, order, row actions); `sidebar.js` and `palette.js` are the two drawings. `agents()`, `setAgentOrder`, `terminal.pin`, `agent.focus`, `keys()`; agent state in `localStorage` (`changed`) and the sort in shared `agents.sort`. |
 | `terminals-list` | — | The TERMINALS list. `panes()`, `spaces()`, `focused()`, `tab.select`, `pane.focus`, `tab.new`, `tab.close`, `pane.close`, `layout.show/hide/select`; panel choice per space in `localStorage` (`panels`). |
 | `footer` | — | The footer, the sidebar menu trigger, `Ctrl+J/K`, flip, new worktree, the deleted-space sweep. `spaces()`, `layout()`, `layout.toggle/resize/set`, `shared` `sidebar.width`, `sidebar.collapsed`, `spaces.pinned`, `search.open`, `search.move`. |
 | `icons` | — | Icons every other mod loads (`mods/icons/*.svg`), plus a top bar used by other layouts: space chip (`git worktree list --porcelain` for the repo's name), search, settings, sidebar toggle, window buttons where the OS draws none. |
-| `search` | overlay | The search sheet. `keys()`, `spaces()`, `agents()`, `panes()`, `space.select/rename/move/new/close`, `tab.select`, `pane.focus`, `worktrees` overlays. |
 | `shortcuts` | overlay | The keys sheet. `keys()`, `commands()`. |
 | `worktrees` | `{space?, folder?, machine?, action}` or `{agent}` | Dialogs: new, open, remove worktree; remove a space; stop an agent. Runs `git worktree list/add/remove` with `exec`, `spaces()`, `space.new/close`, `terminal.kill`; finds `$HOME` with `sh -c 'printf %s "$HOME"'` (PowerShell on Windows). |
 | `sidebar-menu` | overlay | The sidebar's right-click menu. `layout()`, `layout.set` (flip), `layout.hide`, `keys()` for the hints. |
 | `handle` | — | The edge tab while the sidebar is hidden. `placement()`, `layout()`, `layout.show/resize`. |
 | `pane-header` | — | Optional pane header (program, folder, working/needs-you/done, split, zoom, close). Not used by this layout. |
+
+The keys are the repository's `keys.json`: `install.sh` merges its
+`layout:workspace` section into the person's file and keeps the rest, so the file
+they read is the file they install. `docs/bindings.md` lists every key that file
+holds, plus the keys the panels read themselves, and embeds the file ready to
+copy; `tests/bindings.test.mjs` fails when a key is missing from the page, when
+the page names a key the file lost, when the embedded copy drifts, or when
+`install.sh` keeps a map of its own.
 
 Art: every icon is an SVG in each mod's folder, drawn with `svg()` so it takes
 the theme's colour; program marks come from the app's program table (`icons/`).
@@ -273,12 +314,23 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
 - **Ids are the contract.** `sidebar`, `agents`, `terminals`, `sidebar-footer`,
   `main`, `panel`, `panel-body`, `work-body`, `sidebar-lists` are all found by id
   from mods. Renaming one silently drops a panel or the flip half.
-- **The search sheet carries its own icons.** It draws `mods/search/{layers,pin,x}.svg`
-  from its own folder (layers and x copied from icons, pin its own), so the
-  sheet can be lifted out as a mod by itself (README, "The search sheet on its
-  own"). Its only cross-mod needs are the
-  `worktrees` dialogs behind `Ctrl+A` and `Ctrl+D`, and `footer` for the
-  `Ctrl+J`/`Ctrl+K` handshake — `↑`/`↓` work without either.
+- **The sidebar and the sheet are one mod, and cannot be split again.** Herdr
+  rejects an import outside a mod's own folder (and a symlink to one), so the
+  shared rules in `core.js` only work with both views in `mods/agents-list/`.
+  The sheet draws `mods/agents-list/{layers,pin,x}.svg` from its own folder.
+  Its cross-mod needs are the `worktrees` dialogs behind `Ctrl+A` and `Ctrl+D`,
+  and `footer` for the `Ctrl+J`/`Ctrl+K` handshake — `↑`/`↓` work without
+  either. The layout's block must carry `"props": {"sidebar": true}`: without
+  it the block is the sheet.
+- **The worktree tree is one function, `worktreeTree` in `core.js`.** Both views
+  pass it their git answer and it returns which space holds each worktree and
+  each unopened checkout. Do not build parent maps in a view: the sheet's copy
+  silently fell over (helpers it no longer imported) and listed every worktree
+  as a bare row. A worktree is read from the live place **and** `s.folder`, so a
+  shell that `cd`s out of its checkout stays nested. A row is labelled with the
+  checkout's branch, never `s.name`: Herdr renames an unnamed space after its
+  live folder (`test` became `tmp` after one `cd`). For the same reason a
+  checkout that is opened becomes a space **named** after its branch.
 - **Half the icons are Herdr's, not this bundle's.** The mods point at
   `mods/workspace-chrome/*.svg` (search, branch, plus, spinner, chevron, check,
   sidebar), `mods/files/file.svg`, `mods/changes/changes.svg`, `mods/pane/close.svg`
@@ -317,8 +369,9 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
 - **`theme: "omarchy"` must exist.** Without `themes/omarchy.json` the window
   falls back to Herdr's own theme and the intended contrast is gone. Omarchy's
   `omarchy-theme-set-herdr-app` rewrites that file on every theme switch.
-- **`mod.open` toggles.** Opening the search sheet or the keys sheet while it is
-  open closes it — do not "open it again" to raise it.
+- **`mod.open` toggles.** `Alt+F` is `mod.open:agents-list`: with the sheet open,
+  pressing it again closes it — do not "open it again" to raise it. The layout
+  block is a second copy of the same mod, with `sidebar: true`.
 - **No git, no worktrees.** On a folder that is not a checkout the worktree rows
   and dialogs have nothing to offer; a remote space's `git` runs over `exec`'s
   `on:` there, so a disconnected machine just leaves the dialog empty.
@@ -338,8 +391,11 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   sidebar to the right and back, `Ctrl+Shift+D` opens a new-worktree dialog.
 - `Alt+F` then typing `herd` narrows the sheet to matching spaces and agents;
   `↑`/`↓` move the highlight; `Enter` switches; `Ctrl+P` pins the highlighted row
-  and it appears under `PINNED` at the top with a filled pin; `Ctrl+D` on an agent
+  and it appears under `Pinned` at the top with a filled pin; `Ctrl+D` on an agent
   opens the confirmation instead of closing it.
+- `node tests/bindings.test.mjs` passes: every key in `keys.json` has a row in
+  `docs/bindings.md`, the page names nothing the file lost, and the file block on
+  the page is `keys.json` itself (install.sh merges that same file).
 - An agent working shows a spinning ring; blocked shows `Needs you`; finished
   shows a filled dot and stays in the `Done` group when you look at it.
 - A terminal running `ls` keeps its terminal icon (no purple flash); an agent

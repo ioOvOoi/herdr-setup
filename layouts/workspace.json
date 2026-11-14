@@ -19,7 +19,10 @@
               "id": "agents",
               "type": "block",
               "content": {
-                "mod": "agents-list"
+                "mod": "agents-list",
+                "props": {
+                  "sidebar": true
+                }
               },
               "size": {
                 "weight": 2.146141767501831
