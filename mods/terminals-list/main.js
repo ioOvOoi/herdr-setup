@@ -44,7 +44,9 @@ function appTile(t, p, size = 22, glyph = 13.5) {
 
 export default class Terminals extends View {
   init(_props, cx) {
-    this.panels = JSON.parse(localStorage.getItem("panels") ?? "{}");
+    let panels;
+    try { panels = JSON.parse(localStorage.getItem("panels") ?? "{}"); } catch { panels = {}; }
+    this.panels = panels && typeof panels === "object" && !Array.isArray(panels) ? panels : {};
     // Ctrl+Shift+X / Ctrl+Shift+W in this layout (keys.json "layout:workspace").
     cx.spawn(async (cx) => {
       for (;;) {

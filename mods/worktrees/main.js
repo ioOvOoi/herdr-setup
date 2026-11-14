@@ -156,12 +156,19 @@ export default class Worktree extends View {
     this.on = this.space()?.machine;
     this.userHome = this.on ? null : home();
     this.opening = props()?.action === "open";
+    this.opened = false;
     this.text = props()?.branch ?? "";
     this.list = undefined; // open: the checkouts, once read
     this.at = 0;
     this.input = InputState.new({ value: this.text, placeholder: this.opening ? "filter worktrees" : "branch name" });
     this.input.on("change", (_e, cx) => { this.text = this.input.value(); this.error = ""; this.at = 0; cx.notify(); });
-    this.input.on("submit", (_e, cx) => this.go(cx));
+    // Enter in the filter opens the highlighted checkout; in every other
+    // dialog it confirms. (Submitting the filter used to fall through to
+    // go(), which creates a worktree named after the query.)
+    this.input.on("submit", (_e, cx) => {
+      if (this.opening) this.open(this.shown()[this.at]);
+      else this.go(cx);
+    });
     this.inputFocused = true;
     this.input.on("focus", (_e, cx) => { this.inputFocused = true; cx.notify(); });
     this.input.on("blur", (_e, cx) => { this.inputFocused = false; cx.notify(); });
@@ -403,7 +410,8 @@ export default class Worktree extends View {
   }
 
   open(c) {
-    if (!c) return;
+    if (!c || this.opened) return;
+    this.opened = true;
     this.close();
     const s = spaceOf(c.path, this.list, this.on, spaces(), panes());
     // Name the space after the checkout: Herdr names an unnamed space after its

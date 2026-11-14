@@ -35,6 +35,10 @@ for (const name of readdirSync(mods)) {
 const keywords = new Set(["for", "if", "while", "switch", "catch", "return", "else", "try", "do", "function", "with"]);
 const methods = (src) => [...src.matchAll(/^ {2}(?:async\s+)?([A-Za-z_$][\w$]*)\s*\(/gm)].map((m) => m[1]);
 const calls = (src) => [...src.matchAll(/this\.([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]);
+// Context methods are snake_case. `cx.stopPropagation()` is not a host call at
+// all: it threw on the footer buttons, which looked like the window-drag strip
+// eating the press.
+const badContext = (src) => [...src.matchAll(/\bcx\.([a-z]+[A-Z][\w$]*)\s*\(/g)].map((m) => m[1]);
 
 let bad = 0;
 for (const { name, list } of files) {
@@ -52,6 +56,10 @@ for (const { name, list } of files) {
         bad++;
       }
     }
+    for (const method of badContext(src)) {
+      console.log(`${name}/${file}: cx.${method}() is not a host method`);
+      bad++;
+    }
   }
   for (const method of used) {
     if (defined.has(method)) continue;
@@ -60,5 +68,5 @@ for (const { name, list } of files) {
   }
 }
 
-console.log(bad ? `\n${bad} method problem(s)` : `every this.* call is defined in ${files.length} mods, each method once per file`);
+console.log(bad ? `\n${bad} method problem(s)` : `every this.* call is defined in ${files.length} mods, each method once per file, every cx.* call real`);
 process.exit(bad ? 1 : 0);

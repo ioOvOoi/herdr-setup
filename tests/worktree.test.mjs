@@ -110,6 +110,10 @@ check("opening a checkout names the space after its branch",
   /const name = r\.c\?\.branch \?\? r\.branch \?\? base\(r\.path\);[\s\S]{0,180}run\("space\.new", \{ folder: r\.path, name/.test(core));
 check("the worktrees dialog names the space it opens too",
   /const name = c\.branch \?\? c\.path\.split\("\/"\)\.pop\(\);[\s\S]{0,120}run\("space\.new", \{ folder: c\.path, machine: this\.on, name \}\)/.test(read("mods/worktrees/main.js")));
+check("Enter in the open dialog opens the checkout, never makes one",
+  /this\.input\.on\("submit", \(_e, cx\) => \{[\s\S]{0,120}if \(this\.opening\) this\.open\(this\.shown\(\)\[this\.at\]\);[\s\S]{0,80}else this\.go\(cx\);/.test(read("mods/worktrees/main.js")));
+check("a worktree's removal points at its checkout, not its shell's folder",
+  /const folder = tree \? \(inWorktrees\(s\.folder\) \? s\.folder : \(place\(s\) \?\? s\.folder\)\) : null;/.test(core));
 
 // One tree, both views: neither keeps its own parent map builder.
 check("the sidebar builds no tree of its own",

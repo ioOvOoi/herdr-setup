@@ -68,8 +68,21 @@ const install = read("install.sh");
 check("install.sh merges the layout's section from keys.json",
   /"\$here\/keys\.json"/.test(install));
 check("install.sh keeps no copy of the bindings itself",
-  !/"alt-f":\s*"mod\.open:search"/.test(install),
+  !/"alt-f"\s*:\s*"/.test(install),
   "a hand-kept map drifts from keys.json");
+// A fresh home gets Herdr's defaults in global/terminal; the behaviours this
+// layout promises have to be in its own section, or the install never applies
+// them. Alt+F and the tab/space numbering are the ones that were left behind.
+check("the layout section carries the search key",
+  keys["layout:workspace"]?.["alt-f"] === "mod.open:agents-list",
+  "alt-f would only be a global key, which install.sh must not overwrite");
+check("the layout section carries its tab and space numbers",
+  keys["layout:workspace"]?.["alt-1"] === "tab.select:1"
+  && keys["layout:workspace"]?.["ctrl-1"] === "space.select:1");
+check("install.sh adds app-wide keys only where the person has none",
+  /for name in \("global", "terminal"\)/.test(install)
+  && /if key in target or \(not fill and key in ours\)/.test(install),
+  "a layout-only key would leak into other layouts");
 
 // The README points at the page.
 check("the README links the bindings page",

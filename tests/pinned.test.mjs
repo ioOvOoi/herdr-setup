@@ -72,7 +72,7 @@ const pins = [
   { folder: "/home/y/legacy", machine: null, name: "legacy" },
 ];
 
-for (const [mod, file] of [["footer", "main.js"], ["worktrees", "main.js"], ["agents-list", "core.js"]]) {
+for (const [mod, file] of [["footer", "main.js"], ["worktrees", "main.js"], ["icons", "main.js"], ["agents-list", "core.js"]]) {
   const factory = liftPinned(read(mod, file));
   const place = (s) => s?.folder ?? null;
   const isPinned = factory((key) => (key === "spaces.pinned" ? pins : undefined), place);
@@ -92,6 +92,8 @@ for (const [mod, file] of [["footer", "main.js"], ["worktrees", "main.js"], ["ag
 const sweep = read("footer");
 check("the sweep keeps a pinned space instead of closing it",
   /if \(isPinned\(s\)\) \{[\s\S]{0,600}?continue;/.test(sweep), "sweepGone must skip pinned spaces and not close them");
+check("the optional top bar's sweep keeps a pinned space too",
+  /if \(isPinned\(s\)\) continue;/.test(read("icons")), "the top bar must not break the pin promise");
 
 const worktree = read("worktrees");
 check("closing a space refuses while pinned",

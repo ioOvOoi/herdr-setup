@@ -37,10 +37,12 @@ for mod in $BUNDLE; do
 done
 [ -f "$here/themes/omarchy.json" ] && cp "$here/themes/omarchy.json" "$home/themes/"
 
-# The keys this layout expects, taken from this repo's own keys.json so the file a
-# person reads (and docs/bindings.md copies) is the file install.sh merges. They
-# live in the layout's section, so Herdr's other layouts keep Alt+F and Ctrl+J/K
-# for themselves.
+# The keys this setup expects, taken from this repo's own keys.json so the file a
+# person reads (and docs/bindings.md copies) is the file install.sh merges. The
+# layout's own section is updated; a `global`/`terminal` binding is added only
+# when the person's file has none and the layout section does not already carry
+# it (that keeps a layout-only key out of other layouts). With no key file at
+# all, the whole bundle is seeded, since the file is Herdr's complete keymap.
 keys="$home/keys.json"
 if [ -f "$keys" ]; then
   cp "$keys" "$keys.bak.$(date +%s)"
@@ -51,17 +53,37 @@ if command -v python3 >/dev/null 2>&1; then
 import json, pathlib, sys
 path, ours_path = map(pathlib.Path, sys.argv[1:3])
 data = json.loads(path.read_text()) if path.exists() else {}
-ours = json.loads(ours_path.read_text()).get("layout:workspace", {})
+bundle = json.loads(ours_path.read_text())
+ours = bundle.get("layout:workspace", {})
+# With no key file at all there is no person's set to keep: seed the whole file,
+# or the other layouts would have no keys (the file is the complete map). A
+# section that is missing or empty is seeded the same way.
+seed = not data
 section = data.setdefault("layout:workspace", {})
 added = [k for k in ours if k not in section]
 section.update(ours)
+extra = []
+for name in ("global", "terminal"):
+    target = data.setdefault(name, {})
+    fill = seed or not target
+    for key, action in bundle.get(name, {}).items():
+        if key in target or (not fill and key in ours):
+            continue
+        target[key] = action
+        extra.append(f"{name} {key}")
 path.write_text(json.dumps(data, indent=2) + "\n")
-print(f"keys.json: {len(added)} key(s) added to layout:workspace" if added else "keys.json: already has this layout's keys")
+if added:
+    print(f"keys.json: {len(added)} key(s) added to layout:workspace")
+else:
+    print("keys.json: already has this layout's keys")
+if extra:
+    print(f"keys.json: {len(extra)} app-wide key(s) added: {', '.join(extra)}")
 PY
 else
   cat <<EOF
 python3 was not found, so keys.json was not merged. Add the "layout:workspace"
-section of this bundle's keys.json to $keys by hand:
+section of this bundle's keys.json to $keys by hand, and its "global" and
+"terminal" keys your file does not already have:
 
   $here/keys.json
 EOF

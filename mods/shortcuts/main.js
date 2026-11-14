@@ -146,10 +146,22 @@ export default class Keys extends View {
     const about = new Map(commands().map((c) => [c.name, c.about]));
     const q = this.filter.trim().toLowerCase();
     const bySection = new Map();
-    for (const b of keys()) {
+    // A binding in the layout's section repeats its global one when the setup
+    // wants the same action anyway. Listing both would make the sheet read as
+    // two rows for one command; the more specific section is the one in effect.
+    const rank = (section) => section === "global" ? 0 : section.startsWith("layout:") ? 1 : section === "terminal" ? 2 : 3;
+    const bindings = keys();
+    const best = new Map();
+    for (const b of bindings) {
+      if (b.action.startsWith("send:")) continue;
+      const id = `${b.action}\u0000${b.keys}`;
+      best.set(id, Math.max(best.get(id) ?? -1, rank(b.section)));
+    }
+    for (const b of bindings) {
       // Keys that just type bytes into the terminal ("send:...") are one line of
       // noise each and say nothing a person looks up here.
       if (b.action.startsWith("send:")) continue;
+      if (best.get(`${b.action}\u0000${b.keys}`) > rank(b.section)) continue;
       const command = b.action.split(":")[0];
       const said_ = OURS[b.action] ?? about.get(command) ?? said(b.action);
       if (q && !`${b.keys} ${b.action} ${said_} ${heading(b.section)}`.toLowerCase().includes(q)) continue;

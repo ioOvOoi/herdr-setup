@@ -5,8 +5,10 @@ written the way `keys.json` writes them: lowercase modifiers, joined with `-`
 (`ctrl-shift-x`, `alt-1`). Herdr's keys sheet — the keyboard icon in the sidebar
 footer — lists the same bindings, searchable, inside the app.
 
-The first sections are Herdr's own; *This layout* is what this setup adds under
-`layout:workspace`. The sections after it are keys the panels and dialogs read
+The tables group the bindings by what they do. *This layout* is what this setup
+adds for itself; `keys.json` also carries the layout's overrides for its own
+session (tab and space numbers, agents, the sheet) plus the `global` and
+`terminal` keys. The sections after it are keys the panels and dialogs read
 themselves, only while they hold the keyboard, so they never shadow a terminal.
 
 ## Tabs
@@ -212,6 +214,32 @@ your other sections and merges this layout's. The three sections are `global`,
     "ctrl-q": "overlay.close"
   },
   "layout:workspace": {
+    "alt-1": "tab.select:1",
+    "alt-2": "tab.select:2",
+    "alt-3": "tab.select:3",
+    "alt-4": "tab.select:4",
+    "alt-5": "tab.select:5",
+    "alt-6": "tab.select:6",
+    "alt-7": "tab.select:7",
+    "alt-8": "tab.select:8",
+    "alt-9": "tab.select:9",
+    "ctrl-1": "space.select:1",
+    "ctrl-2": "space.select:2",
+    "ctrl-3": "space.select:3",
+    "ctrl-4": "space.select:4",
+    "ctrl-5": "space.select:5",
+    "ctrl-6": "space.select:6",
+    "ctrl-7": "space.select:7",
+    "ctrl-8": "space.select:8",
+    "ctrl-9": "space.select:9",
+    "alt-down": "space.next",
+    "alt-up": "space.prev",
+    "alt-shift-up": "agent.prev",
+    "alt-shift-down": "agent.next",
+    "alt-f": "mod.open:agents-list",
+    "alt-enter": "pane.split:down",
+    "alt-shift-enter": "pane.split:right",
+    "alt-escape": "pane.close",
     "ctrl-j": "footer.dir_down",
     "ctrl-k": "footer.dir_up",
     "ctrl-shift-x": "terminals-list.close_pane",

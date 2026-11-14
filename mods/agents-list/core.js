@@ -515,8 +515,12 @@ export class Workspace extends View {
       title: "Pinned space",
       body: `${s.name} stays: pinned spaces are never closed. Unpin it (Ctrl+P), then close it.`,
     });
+    // A worktree's checkout is the folder it was made in, not necessarily where
+    // its shell is now: a `cd` out of the checkout must not point the removal at
+    // some other repo (the dialog would then only say "not a worktree").
+    const folder = tree ? (inWorktrees(s.folder) ? s.folder : (place(s) ?? s.folder)) : null;
     this.openDialog({ mod: "worktrees", kind: "dialog", width: 440, height: tree ? 155 : 150,
-      props: { space: s.id, action: tree ? "remove" : "space" } });
+      props: { space: s.id, ...(folder ? { folder } : {}), action: tree ? "remove" : "space" } });
   }
 
   // Ctrl+P on the selected row.
@@ -568,6 +572,10 @@ export class Workspace extends View {
       this.beginReorder(k === "j" ? 1 : -1, cx);
       return true;
     }
+    // Only Ctrl+Shift+J/K belong to the list. Other shifted chords are the
+    // app's (`ctrl-shift-p` palette, `ctrl-shift-d` new worktree), and taking
+    // them here meant they stopped working whenever the panel had the keyboard.
+    if (m.shift) return false;
     if (k === "j" || k === "k") {
       this.walk(k === "j" ? 1 : -1, cx);
       return true;

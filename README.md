@@ -33,7 +33,9 @@ the window, and a narrow sidebar folds into a rail of icons.
 ## Requirements
 
 - Herdr **0.1.15**.
-- `git` for the worktree dialogs. Nothing reaches the network.
+- `git` for the worktree dialogs, and `hc` (Herdr's own) for the machine list.
+  Nothing else reaches the network: a remote space's git runs there, and `hc`
+  pairs a rebuilt machine only when you press Connect.
 - Optional: the `omarchy` theme (see [Theme](#theme)).
 
 ## Install
@@ -46,21 +48,23 @@ herdr-app do layout.switch --name workspace
 ```
 
 `install.sh` copies the layout, its nine mods and its theme into
-`~/.config/herdr-app`, and merges the layout's keys into `keys.json` (the old
-file is kept as `keys.json.bak.<time>`). It touches nothing else. Set
-`HERDR_APP_HOME` to install elsewhere.
+`~/.config/herdr-app`, then merges this layout's keys into `keys.json`: its
+section is updated, and the bundle's `global` and `terminal` bindings are added
+only where yours has none (the old file is kept as `keys.json.bak.<time>`). It
+touches nothing else. Set `HERDR_APP_HOME` to install elsewhere.
 
 To install by hand, copy `layouts/workspace.json` and `layouts/workspace.svg`
 into `layouts/`, the nine mod folders listed below into `mods/`, and
 `themes/omarchy.json` into `themes/`, then merge the `layout:workspace` section
-of this repository's `keys.json` into yours.
+of this repository's `keys.json` into yours (and any `global`/`terminal` keys
+your file is missing).
 
 ## Keys
 
 `keys.json` is the file: Herdr's own keys, this layout's section
-(`layout:workspace`) and the terminal's. `install.sh` merges this layout's
-section into yours and keeps everything else. Herdr's other layouts keep
-`Ctrl+J`/`Ctrl+K` for themselves.
+(`layout:workspace`) and the terminal's. `install.sh` updates this layout's
+section and adds the bundle's app-wide keys where yours has none, keeping
+everything else. Herdr's other layouts keep `Ctrl+J`/`Ctrl+K` for themselves.
 
 Every binding, with what it does, is in
 [docs/bindings.md](docs/bindings.md) — the page is checked against `keys.json`,

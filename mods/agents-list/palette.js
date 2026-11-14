@@ -1,13 +1,13 @@
 // Spaces, worktrees and agents in one keyboard-driven search sheet.
 // Opened with Alt+F (mod.open:agents-list). Type to filter, ↑/↓, Enter,
 // Esc; Ctrl+R rename, Ctrl+D close, Ctrl+Shift+J/K move the highlighted space.
-import { View, div, svg, image } from "gpui-kit";
+import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, panes, agents, run, openOverlay, closeOverlay, props, theme, settings, shared, setShared, notify } from "herdr";
+import { spaces, agents, run, closeOverlay, props, theme, settings, shared, setShared } from "herdr";
 import {
-  Workspace, MARK, PROJECT_COLORS, wash, tileOf, inkOf, marks, keycap, shortcutOf, place,
-  pinnedList, isPinned, spaceAt, openSpaceFor, isRemoving, folderColor, pinLabel, norm, base,
-  spaceColors, spaceColor, repoOf, checkouts, inside, worktreeTree, RANK,
+  Workspace, MARK, wash, tileOf, inkOf, marks, keycap, shortcutOf, place,
+  pinnedList, openSpaceFor, isRemoving, folderColor, pinLabel, norm, base,
+  spaceColor, repoOf, checkouts, inside, worktreeTree, RANK,
 } from "./core.js";
 
 // Worktree spaces are found by running git, which is fast but not instant. Keep
@@ -18,7 +18,10 @@ const CACHE_KEY = "search.worktrees";
 // answer ("this is a worktree") stays true, and a miss is a visible flicker.
 const cacheKey = (s) => `${s.id}\u0000${norm(s.folder ?? "")}`;
 function readCache() {
-  try { return JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}"); } catch { return {}; }
+  try {
+    const hit = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}");
+    return hit && typeof hit === "object" && !Array.isArray(hit) ? hit : {};
+  } catch { return {}; }
 }
 
 export class Palette extends Workspace {
@@ -881,6 +884,14 @@ export class Palette extends Workspace {
       .child(div().text_size(9.5).font_medium().child(`${tally[word]} ${word}`));
 
     return v_flex().id("palette").track_focus(this.handle).on_click((_e, cx) => { this.handle.focus(); this.note = null; cx.notify(); }).w_full().h_full().min_h(0).p(18).gap(12).bg(t.popover).text_size(13)
+      // A drag released outside the list never reaches its own mouse-up; clear
+      // it here so the next hover cannot draw a drop line for an old press.
+      .on_mouse_up("left", (_e, cx) => {
+        if (this.pressed === null) return;
+        this.pressed = null;
+        this.over = null;
+        cx.notify();
+      })
       .on_key_up((e) => { if (e.key === "j" || e.key === "k") this.stopReorder(); })
       .on_key_down((e, cx) => {
         const k = e.key, ctrl = e.modifiers.control;
@@ -900,7 +911,7 @@ export class Palette extends Workspace {
           this.filter += " ";
           this.follow = null;
           this.at = -1;
-        } else if (k.length === 1 && !ctrl && !e.modifiers.alt) {
+        } else if (k.length === 1 && !ctrl && !e.modifiers.alt && !e.modifiers.platform) {
           this.filter += k;
           this.follow = null;
           this.at = -1;

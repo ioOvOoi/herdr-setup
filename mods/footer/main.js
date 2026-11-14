@@ -143,7 +143,7 @@ export default class Status extends View {
     return div().id(id).size(26).flex_none().rounded(7).flex().items_center().justify_center()
       .text_color(t.muted).hover((s) => s.bg(wash(t.foreground, "0e")).text_color(t.foreground))
       .tooltip(tip)
-      .on_mouse_down("left", (_e, cx) => cx.stopPropagation())
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click(action).child(svg(icon).size(14));
   }
 
@@ -163,7 +163,7 @@ export default class Status extends View {
       .when(!narrow, (el) => el.child(h_flex().flex_1().min_w(0).gap(7).items_center().rounded(7).py(2).px(3)
         .cursor_pointer().hover((x) => x.bg(wash(t.foreground, "0b")).text_color(t.foreground))
         .tooltip("Machines")
-        .on_mouse_down("left", (_e, cx) => cx.stopPropagation())
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
         .on_click(() => run("app.settings", { section: "machines" }))
         .child(div().size(20).flex_none().rounded(6).bg(wash(t.foreground, "07")).border(1).border_color(wash(t.foreground, "0c"))
           .flex().items_center().justify_center()

@@ -45,11 +45,17 @@ check("the sheet's other chords are in the shared map",
   pin > 0 && rename > 0 && close > 0 && worktree > 0);
 check("the shared map is one function, used by both views",
   /this\.chord\(e, cx\)/.test(palette) && /this\.chord\(e, cx\)/.test(side));
+check("a shifted Ctrl chord other than J/K is left to the app",
+  /if \(m\.shift\) return false;/.test(core),
+  "Ctrl+Shift+P and Ctrl+Shift+D would be swallowed by the panel");
 
 // The sheet's key handler runs the shared map before its typing branches.
 const sheetChord = palette.indexOf("if (this.chord(e, cx))");
 const sheetType = palette.indexOf('k.length === 1 && !ctrl');
 check("the sheet reads the shared map before typing", sheetChord > 0 && sheetType > sheetChord);
+check("typing does not take the platform chord",
+  /k\.length === 1 && !ctrl && !e\.modifiers\.alt && !e\.modifiers\.platform/.test(palette),
+  "Cmd+C on macOS would type a c instead of copying");
 
 // The sidebar's plain keys are handled after its modifier return, so the shared
 // map must run before that return or the chords fall through to the app.

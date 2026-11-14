@@ -17,20 +17,24 @@ jobs:
           node-version: "20"
       - name: mod tests
         run: |
+          set -euo pipefail
           for test in tests/*.test.mjs; do
             printf '%-28s ' "$test"
-            node "$test" | tail -1
+            node "$test" >/tmp/test.out && tail -1 /tmp/test.out
           done
       - name: install into a scratch Herdr home
         run: |
           mkdir -p /tmp/herdr-home
           HERDR_APP_HOME=/tmp/herdr-home ./install.sh
           test -f /tmp/herdr-home/layouts/workspace.json
-          test -d /tmp/herdr-home/mods/search
+          test -d /tmp/herdr-home/mods/agents-list
+          test ! -e /tmp/herdr-home/mods/search
           python3 - <<'PY'
           import json
           keys = json.load(open("/tmp/herdr-home/keys.json"))
-          section = keys.get("layout:workspace", {})
-          assert section.get("alt-f") == "mod.open:search", section
-          print("keys merged:", len(section), "bindings")
+          layout = keys.get("layout:workspace", {})
+          assert layout.get("alt-f") == "mod.open:agents-list", layout
+          assert keys["global"].get("ctrl-q") == "overlay.close", keys["global"]
+          assert keys["terminal"].get("ctrl-q") == "send:\u0011", keys["terminal"]
+          print("keys merged:", len(layout), "layout bindings")
           PY

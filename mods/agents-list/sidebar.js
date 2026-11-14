@@ -1,12 +1,12 @@
 // Agents in grouped or priority views; parents take their most urgent sub-agent's place.
 // A viewed done agent stays in Done until left.
 
-import { View, div, image, svg } from "gpui-kit";
+import { div, image, svg } from "gpui-kit";
 import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, machines, run, exec, hc, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, watchFolder, home, notify, nextCommand } from "herdr";
 import {
   Workspace, wash, place, norm, tidyPath, base, inWorktrees, isRemoving, removingList,
-  pinnedList, isPinned, writePins, samePin, checkouts, worktreeTree, spaceColor, PROJECT_COLORS, MARK, RANK,
+  pinnedList, checkouts, worktreeTree, spaceColor, RANK,
 } from "./core.js";
 
 // The block that shows a given mod, and the column around it.
@@ -48,6 +48,25 @@ function toggleSidebar() {
 }
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
+
+// localStorage is a cache an older version (or a bad write) may have left in a
+// shape this build doesn't expect. A broken value must not stop the sidebar
+// from loading: read it as absent instead.
+function stored(key, fallback) {
+  try {
+    return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+const storedObject = (key) => {
+  const value = stored(key, {});
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+};
+const storedArray = (key) => {
+  const value = stored(key, []);
+  return Array.isArray(value) ? value : [];
+};
 
 function leadPanes(all) {
   const leads = new Map();
@@ -231,9 +250,9 @@ export class Sidebar extends Workspace {
     this.watchQueued = false;  // a burst of changes waits for one read
     // Machines as only hc knows them: connected, needs a login, unreachable.
     this.hcMachines = [];
-    this.reconnecting = JSON.parse(localStorage.getItem("agents.reconnecting") ?? "{}");
-    for (const state of Object.values(this.reconnecting)) state.busy = false;
-    this.machinesFolded = new Set(JSON.parse(localStorage.getItem("agents.machines.folded") ?? "[]"));
+    this.reconnecting = storedObject("agents.reconnecting");
+    for (const state of Object.values(this.reconnecting)) if (state && typeof state === "object") state.busy = false;
+    this.machinesFolded = new Set(storedArray("agents.machines.folded"));
     this.refreshMachines(cx, true);
     cx.timer.every(15000, (cx) => this.refreshMachines(cx));
     this.gitBusy = new Set();
@@ -252,8 +271,8 @@ export class Sidebar extends Workspace {
     cx.timer.every(400, () => this.fitRail());
     this.watchRepo(cx, "worktrees", `${home()}/.herdr/worktrees`);
     // Each agent's last state and when it changed (ms), kept across restarts.
-    this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}");
-    this.pendingPins = JSON.parse(localStorage.getItem("pins") ?? "[]");
+    this.changed = storedObject("changed");
+    this.pendingPins = storedArray("pins");
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
     // The age labels are drawn in minutes, so one repaint a minute is enough:
@@ -554,9 +573,14 @@ export class Sidebar extends Workspace {
     sidebarDialog(opts);
   }
 
-  // A dialog, opened at the size the space menu opens it.
+  // A dialog, opened at the size the space menu opens it. A removal names the
+  // checkout itself: a space whose shell cd'd out of its worktree must still
+  // remove the checkout it was made in, not whatever repo it is standing in now.
   dialog(s, action, width, height, extra = {}) {
-    this.openDialog({ mod: "worktrees", kind: "dialog", width, height, props: { space: s?.id, action, ...extra } });
+    const here = s ? (place(s, panes()) ?? s.folder) : null;
+    const folder = action === "remove" ? (inWorktrees(s?.folder) ? s.folder : here) : null;
+    this.openDialog({ mod: "worktrees", kind: "dialog", width, height,
+      props: { space: s?.id, ...(folder ? { folder } : {}), action, ...extra } });
   }
 
 
@@ -984,7 +1008,8 @@ export class Sidebar extends Workspace {
       const isWorktreeSpace = this.isWorktree(s) || Boolean(this.linked);
       const worktree = (action, width, height, extra = {}) => then(() => {
         if (action === "new") setShared("worktree.owner", { space: s.id, at: Date.now() });
-        sidebarDialog({ mod: "worktrees", kind: "dialog", width, height, props: { space: s.id, action, ...extra } });
+        sidebarDialog({ mod: "worktrees", kind: "dialog", width, height,
+          props: { space: s.id, ...(action === "remove" && folder ? { folder } : {}), action, ...extra } });
       });
       const closeSpace = then(() => sidebarDialog({ mod: "worktrees", kind: "dialog", width: 440, height: 150, props: { space: s.id, action: "space" } }));
       items = [
@@ -1108,14 +1133,17 @@ export class Sidebar extends Workspace {
     });
   }
 
-  subRow(t, s, shown, compact) {
+  subRow(t, s, shown, compact, nest = 0) {
     const k = s.t;
     const st = kidStatus(k, this.listed);
     const on = k.address === shown;
     return h_flex()
       .id(`sub-${k.address}`)
       .relative()
-      .pl(40)
+      // A sub-agent sits one step in from the agent row that drew it. Under a
+      // worktree's agent that row is already two steps in (nest 2), so the old
+      // fixed 40 px put the child left of its parent and outside the gutter.
+      .pl(nest > 0 ? 11 + nest * 29 : 40)
       .pr(7)
       .rounded(7)
       .h(27)
@@ -1142,7 +1170,7 @@ export class Sidebar extends Workspace {
   // bottom of one third of it. Only the blocks this put away are put back, and
   // the list is remembered, so a restart while collapsed restores them too.
   fitRail() {
-    const hid = JSON.parse(localStorage.getItem("rail.hid") ?? "[]");
+    const hid = storedArray("rail.hid");
     const sidebar = find(layout(), "sidebar");
     if (narrow() && sidebar && !sidebar.hidden) {
       if (hid.length) return;
@@ -1312,7 +1340,7 @@ export class Sidebar extends Workspace {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover).text_color(t.foreground))
       .on_click((_e, cx) => {
-        cx.stopPropagation ? cx.stopPropagation() : cx.stop_propagation();
+        cx.stop_propagation();
         open ? this.folded.add(a.address) : this.folded.delete(a.address);
         cx.notify();
       })
@@ -1438,7 +1466,7 @@ export class Sidebar extends Workspace {
     const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
     for (const a of rest) {
       const r = rankOf(a) || RANK.idle;
-      const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
+      const id = byPriority ? `sec-${r}` : `space-${a.space}`;
       if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
       else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
     }
@@ -1619,7 +1647,7 @@ export class Sidebar extends Workspace {
       const r = row(a, i, subs, nest);
       const mine = [{ key: `ag-${a.address}`, kind: "agent", address: a.address, pane: a.pane, spaceId: a.space, focused: a.focused }, r];
       if (this.folded.has(a.address)) return [mine];
-      return [mine, ...subs.map((s) => [{ key: `sub-${s.t.address}`, kind: "agent", address: s.t.address, pane: null, spaceId: a.space }, this.subRow(t, s, shown, byPriority)])];
+      return [mine, ...subs.map((s) => [{ key: `sub-${s.t.address}`, kind: "agent", address: s.t.address, pane: null, spaceId: a.space }, this.subRow(t, s, shown, byPriority, nest)])];
     };
 
     // The fold chevron; folded, the count too, colored by the most urgent one.
@@ -1672,6 +1700,9 @@ export class Sidebar extends Workspace {
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
+      // The tree gutter follows the row's own indent (a worktree's agents are
+      // one level deeper than a repo's).
+      const gutter = 30 + Math.max(0, nest - 1) * 29;
       if (collapsed) {
         return h_flex()
           .id(`ag-${a.address}`)
@@ -1715,8 +1746,8 @@ export class Sidebar extends Workspace {
         })
         .on_click(() => this.focusAgent(a))
         .on_mouse_down("right", (_e, cx) => { cx.stop_propagation(); this.agentMenu(a); })
-        .when(nest > 0, (el) => el.child(div().absolute().left(30).top(0).bottom(0).w(1).bg(wash(t.foreground, "12"))))
-        .when(nest > 0, (el) => el.child(div().absolute().left(30).top(17).w(7).h(1).bg(wash(t.foreground, "12"))))
+        .when(nest > 0, (el) => el.child(div().absolute().left(gutter).top(0).bottom(0).w(1).bg(wash(t.foreground, "12"))))
+        .when(nest > 0, (el) => el.child(div().absolute().left(gutter).top(17).w(7).h(1).bg(wash(t.foreground, "12"))))
         .child(div().id(`agent-fold-${a.address}`).flex_none()
           .when(subs.length > 0, el => el.on_click((_e, cx) => {
             cx.stop_propagation();
@@ -1924,7 +1955,7 @@ export class Sidebar extends Workspace {
           .child(g ? this.gitTail(g, tree, s.name, t) : div().flex_1())
           .when(hidden > 0, (el) => el.child(countPill(t, hidden, topTone)))
           .child(div().size(18).flex_none().flex().items_center().justify_center()
-            .when(kids.length > 0 || worktreesOf(s).length > 0, (el) => el.child(div()
+            .when(kids.length > 0 || worktreesOf(s).length > 0 || checkoutsOf(s).length > 0, (el) => el.child(div()
             .id(`sfold-${s.id}`)
             .size(18)
             .flex_none()
@@ -2166,7 +2197,7 @@ export class Sidebar extends Workspace {
       const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
       for (const a of rest) {
         const r = rankOf(a) || RANK.idle;
-        const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
+        const id = byPriority ? `sec-${r}` : `space-${a.space}`;
         if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
         else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
       }

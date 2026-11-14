@@ -15,6 +15,13 @@ const norm = (p) => (p ?? "").replace(/\/+$/, "");
 // Is `path` inside `root` (or root itself)?
 const inside = (path, root) => { const p = norm(path), r = norm(root); return Boolean(r) && (p === r || p.startsWith(`${r}/`)); };
 
+// A pinned space is never closed, by this bar's sweep either: the pin is the
+// promise, and the optional top bar must keep it wherever the footer does.
+const pinnedList = () => (Array.isArray(shared("spaces.pinned")) ? shared("spaces.pinned") : []);
+const isPinned = (s) => Boolean(s?.id) && pinnedList().some((p) => (p.id
+  ? p.id === s.id
+  : (p.machine ?? null) === (s.machine ?? null) && norm(p.folder) === norm(s.folder)));
+
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
@@ -123,6 +130,8 @@ export default class WorkspaceChrome extends View {
     for (const s of gone) if (!seen.has(s.id)) seen.set(s.id, now);
     for (const id of [...seen.keys()]) if (!gone.some((s) => s.id === id)) seen.delete(id);
     for (const s of gone) {
+      // The pin is the promise: a pinned space stays, even with its folder gone.
+      if (isPinned(s)) continue;
       if (now - (seen.get(s.id) ?? now) < 6000) continue;
       seen.delete(s.id);
       this.dropPin(s);
@@ -185,7 +194,7 @@ export default class WorkspaceChrome extends View {
     const showBranch = !tight && branch && branch !== name ? branch : null;
     return h_flex().id("active-space").flex_1().min_w(0).gap(tight ? 6 : 8).items_center().py(2).px(tight ? 2 : 4).rounded(7)
       .cursor_pointer().hover((x) => x.bg(wash(t.foreground, "0c"))).tooltip(`${name}${tree && branch ? ` \u00b7 ${branch}` : ""}${s.folder ? ` \u2014 ${s.folder}` : ""}`)
-      .on_mouse_down("left", (_e, cx) => cx.stopPropagation())
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click(() => run("mod.open", { name: "agents-list" }))
       .child(h_flex().size(22).flex_none().rounded(7).bg(spaceColor(t, { ...s, id, name })).items_center().justify_center()
         .border(1).border_color(wash(t.foreground, "14"))

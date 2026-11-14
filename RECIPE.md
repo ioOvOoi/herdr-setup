@@ -148,9 +148,10 @@ and offers to make one.
 
 **In the sidebar**
 
-- Click an agent row: that agent gets the keyboard (`agent.focus`). Hovering the
-  row reveals its pin button (accent when pinned, `terminal.pin`); a sub-agent
-  sits indented under its parent behind a `↳` and has no status of its own.
+- Click an agent row: that agent gets the keyboard (`agent.focus`). An agent's
+  pin lives in its right-click menu (`terminal.pin`), not on the row; a space row
+  reveals its own pin button on hover (accent when pinned, `setPin`). A sub-agent
+  sits indented under its parent behind a `↳`, with its own state mark.
 - Click a terminal row: `tab.select` then `pane.focus` — the row is the tab and
   the pane at once. Clicking the `Files` or `Changes` button shows that panel on
   the right (accent while shown) and clicking it again hides the panel, per
@@ -225,11 +226,11 @@ and offers to make one.
   row (just the pin) or an agent (a dialog asks first; a sub-agent is refused with
   a toast, it reports to its parent).
 - The footer of the sheet is its own cheat line: `↵ switch`, `^J/^K move`,
-  `^R rename`, `^A worktree`, `^P unpin`/`^P pin`, `^D/^K reorder`.
+  `^R rename`, `^A worktree`, `^P unpin`/`^P pin`, `^⇧J/^⇧K reorder`.
 - **A step is one place, and only a space steps.** A step is one place in the
   space order (over the agent and worktree rows between spaces, and past the
   pinned/unpinned line, which pins or unpins so the row lands where it was put).
-  It reads `aimedOrder()`, not `spaces()`: a `space.move` lands asynchronously,
+  It reads `aimedReorder()`, not `spaces()`: a `space.move` lands asynchronously,
   and reading the app's order twice within one frame aimed two presses at the
   same neighbour — the second then did nothing ("it only moves one row"). The aim
   is trusted for 1.2 s and only while it still lists the same spaces. With a
@@ -293,13 +294,14 @@ Mods, all `"place": "none"` (the layout decides where they draw):
 | `handle` | — | The edge tab while the sidebar is hidden. `placement()`, `layout()`, `layout.show/resize`. |
 | `pane-header` | — | Optional pane header (program, folder, working/needs-you/done, split, zoom, close). Not used by this layout. |
 
-The keys are the repository's `keys.json`: `install.sh` merges its
-`layout:workspace` section into the person's file and keeps the rest, so the file
-they read is the file they install. `docs/bindings.md` lists every key that file
-holds, plus the keys the panels read themselves, and embeds the file ready to
-copy; `tests/bindings.test.mjs` fails when a key is missing from the page, when
-the page names a key the file lost, when the embedded copy drifts, or when
-`install.sh` keeps a map of its own.
+The keys are the repository's `keys.json`: `install.sh` updates its
+`layout:workspace` section in the person's file and adds its `global` and
+`terminal` keys only where theirs has none, so the file they read is the file
+they install while their own bindings are kept. `docs/bindings.md` lists every
+key that file holds, plus the keys the panels read themselves, and embeds the
+file ready to copy; `tests/bindings.test.mjs` fails when a key is missing from
+the page, when the page names a key the file lost, when the embedded copy
+drifts, or when `install.sh` keeps a map of its own.
 
 Art: every icon is an SVG in each mod's folder, drawn with `svg()` so it takes
 the theme's colour; program marks come from the app's program table (`icons/`).
@@ -333,8 +335,8 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   checkout that is opened becomes a space **named** after its branch.
 - **Half the icons are Herdr's, not this bundle's.** The mods point at
   `mods/workspace-chrome/*.svg` (search, branch, plus, spinner, chevron, check,
-  sidebar), `mods/files/file.svg`, `mods/changes/changes.svg`, `mods/pane/close.svg`
-  and `mods/tabs/win-*.svg`. Those folders are Herdr's shipped mods and are not
+  server, monitor, sidebar), `mods/files/file.svg` and
+  `mods/changes/changes.svg`. Those folders are Herdr's shipped mods and are not
   copied into this repository — they exist on any Herdr install, but a rebuild must
   not expect them in the bundle, and renaming a path here means drawing nothing.
 - **The layout must be a clone.** `layout.set` — the flip and the panel's width
@@ -379,8 +381,9 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   ending it, because the parent owns its life.
 - Worktrees live at `<home>/.herdr/worktrees/<repo>/<branch>` on the space's
   machine — the same place Herdr's own space menu uses; nothing is custom.
-- Nothing reaches the network. The only programs run are `git` and a shell for
-  `$HOME` (search, shortcuts, and the lists are all live app data).
+- No network of its own. The programs it runs are `git`, `hc` (the machine
+  list and a reconnect) and a shell for `$HOME`; a remote space's `git` runs
+  there, over its connection.
 
 ## Done when
 
@@ -408,9 +411,9 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   pane menu aimed at that row's pane.
 - The keyboard icon in the footer opens the keys sheet, where typing `search`
   finds the search binding and `Esc` closes it.
-- `herdr-app check mods/<each>` passes for all ten mods, and `herdr-app status`
+- `herdr-app check mods/<each>` passes for all nine mods, and `herdr-app status`
   reports no errors.
-- The seven test files pass: `node tests/*.test.mjs`. They cut functions out of
+- The ten test files pass: `node tests/*.test.mjs`. They cut functions out of
   the mods and run them with stubs, so they fail when the code changes rather
   than when the test drifts.
 - Reorder: `Ctrl+Shift+K` three times on the last space moves it three places
