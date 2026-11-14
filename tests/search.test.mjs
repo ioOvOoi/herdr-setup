@@ -12,6 +12,28 @@ import { fileURLToPath } from "node:url";
 
 const root = process.env.SEARCH_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = readFileSync(join(root, "mods/agents-list/palette.js"), "utf8");
+const engine = readFileSync(join(root, "mods/agents-list/workspace-engine.js"), "utf8");
+
+// The scoring rule is the engine's, imported by the sheet. Lift the same text
+// so this test exercises the rule the two views actually rank by.
+function liftEngine(name) {
+  const at = engine.indexOf(`export function ${name}(`);
+  if (at >= 0) {
+    let depth = 0;
+    for (let i = at; i < engine.length; i++) {
+      if (engine[i] === "{") depth++;
+      else if (engine[i] === "}" && --depth === 0) {
+        return engine.slice(at, i + 1).replace(/^export /, "");
+      }
+    }
+  }
+  const line = engine.indexOf(`export const ${name} =`);
+  if (line < 0) throw new Error(`workspace-engine.js: no ${name}`);
+  const end = engine.indexOf(";", line) + 1;
+  return engine.slice(line, end).replace(/^export /, "");
+}
+const termsOf = new Function(`${liftEngine("termsOf")}; return termsOf;`)();
+const scoreTerms = new Function(`${liftEngine("scoreTerms")}; return scoreTerms;`)();
 
 function method(name) {
   const at = src.indexOf(`  ${name}(`);
@@ -26,7 +48,7 @@ const check = (label, ok, extra = "") => {
   console.log(`${ok ? "ok  " : "FAIL"} ${label}${ok || !extra ? "" : ` — ${extra}`}`);
 };
 
-const search = new Function("spaces", "agents", "pinnedList", "openSpaceFor", "place", "norm", "base",
+const search = new Function("spaces", "agents", "pinnedList", "openSpaceFor", "place", "norm", "base", "termsOf", "scoreTerms",
   `${method("search")}; return search;`);
 
 const norm = (p) => (p ?? "").replace(/\\/g, "/");
@@ -42,12 +64,17 @@ function rows(world, q) {
     // has its own home (tests/pinned.test.mjs), so here every row is live.
     liveSpaces() { return world.spaces ?? []; },
     liveTrees() { return this.worktrees; },
+    // The sheet's ordering hooks, without a persisted order: the world's own.
+    kidsOf(all, id) { return all.filter((s) => this.parent.get(s.id) === id); },
+    checkoutsOf(all, id) {
+      return this.worktrees.filter((w) => !w.c.main && this.checkoutParent.get(`${w.on ?? ""}\u0000${w.c.path}`) === id);
+    },
     // The row's name: the sheet reads a worktree's checkout, but this world has
     // none, so the space's own name is what every row shows.
     spaceName(s) { return s.name; },
   };
   return search(() => world.spaces ?? [], () => world.agents ?? [], () => world.pins ?? [],
-    () => null, (s) => s.folder, norm, base).call(self, q);
+    () => null, (s) => s.folder, norm, base, termsOf, scoreTerms).call(self, q);
 }
 
 const repo = { id: "r", name: "kleeamp", folder: "/repo", machine: null, status: "idle" };
@@ -97,6 +124,9 @@ check("search: an agent in a worktree climbs to the repo's space",
 check("search: the agent is the hit, its space is not",
   out.find((r) => r.kind === "agent")?.hit === true && out[0].hit === false,
   JSON.stringify(out.map((r) => r.hit)));
+
+check("search: a folderless active space still loads the other spaces' worktrees",
+  !/if \(!this\.folder\) \{ this\.loaded = true; return; \}/.test(src));
 
 console.log(failures ? `\n${failures} failed` : "\nall search checks passed");
 process.exit(failures ? 1 : 0);

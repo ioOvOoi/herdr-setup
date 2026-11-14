@@ -6,7 +6,7 @@
 // worktree dialog answered "this.dropPin is not a function" when it was used.
 //
 // A mod is one program, even when it is several files: the sidebar and the find
-// sheet are one mod, and `this.pinRow` is defined in core.js for both of them.
+// sheet are one mod, and `this.pinRow` is defined in workspace-engine.js for both of them.
 // So a call is checked against every `.js` file the mod ships, while a duplicate
 // is only a problem inside the file that defines it.
 //

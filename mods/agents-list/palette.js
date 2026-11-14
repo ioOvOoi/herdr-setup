@@ -3,55 +3,36 @@
 // Esc; Ctrl+R rename, Ctrl+D close, Ctrl+Shift+J/K move the highlighted space.
 import { div, svg, image } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, agents, run, closeOverlay, props, theme, settings, shared, setShared } from "herdr";
+import { spaces, agents, panes, run, closeOverlay, props, theme, settings, shared, setShared } from "herdr";
 import {
   Workspace, MARK, wash, tileOf, inkOf, marks, keycap, shortcutOf, place,
-  pinnedList, openSpaceFor, isRemoving, folderColor, pinLabel, norm, base,
-  spaceColor, repoOf, checkouts, inside, worktreeTree, RANK,
-} from "./core.js";
-
-// Worktree spaces are found by running git, which is fast but not instant. Keep
-// the last answer per space so the first frame of a new open already shows the
-// branch icon instead of flashing the space avatar.
-const CACHE_KEY = "search.worktrees";
-// The branch must not be part of the key: a checkout's branch can move while the
-// answer ("this is a worktree") stays true, and a miss is a visible flicker.
-const cacheKey = (s) => `${s.id}\u0000${norm(s.folder ?? "")}`;
-function readCache() {
-  try {
-    const hit = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "{}");
-    return hit && typeof hit === "object" && !Array.isArray(hit) ? hit : {};
-  } catch { return {}; }
-}
+  pinnedList, isRemoving, removingList, folderColor, pinLabel, norm, base,
+  tidyPath, spaceColor, worktreeTree, RANK, askGit, listedCheckouts, pictureKey,
+  beginPaint, endPaint, frameCache, scoreTerms, termsOf, checkoutRecordOf,
+  groupKeyOf, orderedPaths, movePathWithin, machineIndexOf, persistWorkspace,
+  touchWorkspace, SEP,
+} from "./workspace-engine.js";
 
 export class Palette extends Workspace {
   init(_props, cx) {
-    // Pins and pins-as-places are the sidebar's too: one rule, one bind.
+    // Pins and pins-as-places are the sidebar's too: one rule, one bind. This
+    // also hydrates the shared picture, so the first frame already knows every
+    // repo, checkout and sticky worktree — no git, no localStorage guess.
     this.initShared();
     this.filter = "";
     this.at = null;
     this.scrollTop = 0;
-    this.repos = [];
-    this.worktrees = [];
-    this.worktreeSpaces = new Set();
     this.parent = new Map();
     this.checkoutParent = new Map();
-    this.checkoutById = new Map();
-    const cached = readCache();
-    for (const s of spaces()) {
-      const hit = cached[cacheKey(s)];
-      if (!hit?.worktree) continue;
-      this.worktreeSpaces.add(s.id);
-      if (hit.parent) this.parent.set(s.id, hit.parent);
-      if (hit.branch) this.checkoutById.set(s.id, { branch: hit.branch, path: hit.path ?? null, linked: true });
-    }
-    this.loaded = false;
     this.pressed = null; // the space row held by the mouse
     this.over = null;    // the space row it would land on
     this.note = null;    // the footer's word about the last step
     this.active = spaces().find((s) => s.active) ?? null;
     this.folder = place(this.active);
     this.on = this.active?.machine ?? null;
+    // A checkout made before this sheet opened is already in the shared list.
+    // Remembering the timestamp here keeps opening the sheet from jumping to it.
+    this.createdAt = shared("worktree.createdAt") ?? 0;
     // The search text is ours: a text field would take Ctrl+A (select all) and
     // Ctrl+A has to reach the palette (a worktree of the highlighted row).
     this.filter = "";
@@ -76,131 +57,45 @@ export class Palette extends Workspace {
       grab(cx);
     });
     // A dialog opened from here takes the keyboard; when it closes, take it back.
+    // The revision is the sidebar's picture: when it moves, draw again. A notify
+    // over there does not reach this overlay. No git is asked for here: opening
+    // the sheet is not a reason to run a subprocess.
     let closed = shared("overlay.closed");
+    let seenRev = shared("workspace.rev") ?? 0;
     cx.timer.every(250, (cx) => {
       const now = shared("overlay.closed");
-      if (now !== closed) { closed = now; this.handle.focus(); this.load(cx); cx.notify(); }
-    });
-    this.load(cx);
-  }
-
-  // Worktrees and the space tree, read again whenever the spaces change.
-  load(cx) {
-    if (!this.folder) { this.loaded = true; return; }
-    const keep = this.at === null ? null : this.rowKey(this.selected());
-    cx.spawn(async (cx) => {
-      try {
-        // Worktrees for every repo the spaces live in, not only the active one.
-        // Both the live terminal folder and the space's start folder count.
-        const seen = new Set(), places = [];
-        for (const s of spaces()) {
-          for (const folder of [place(s), s.folder]) {
-            const on = s.machine ?? null, key = `${on ?? ""}\u0000${folder ?? ""}`;
-            if (!folder || seen.has(key)) continue;
-            seen.add(key); places.push({ folder, on });
-          }
-        }
-        const repoSeen = new Set(), repos = [];
-        await Promise.all(places.map(async (p) => {
-          try {
-            const repo = await repoOf(p.folder, p.on);
-            if (!repo) return;
-            const key = `${p.on ?? ""}\u0000${repo.main}`;
-            if (repoSeen.has(key)) return;
-            repoSeen.add(key); repos.push({ repo, on: p.on });
-          } catch {}
-        }));
-        const worktrees = [];
-        await Promise.all(repos.map(async (r) => {
-          try { for (const c of await checkouts(r.repo, r.on)) worktrees.push({ c, repo: r.repo, on: r.on }); }
-          catch {}
-        }));
-        // Build the new tree privately, then swap it in one go: resetting the
-        // live maps first makes rows flicker from space icon to branch icon.
-        const nextWorktrees = worktrees.filter((w) => w.c.main || !openSpaceFor(w.c.path, w.on));
-        const mine = [this.folder, this.active?.folder].filter(Boolean).map(norm);
-        const nextRepo = repos.find((r) => (r.on ?? null) === (this.on ?? null)
-          && mine.some((f) => inside(f, norm(r.repo.main)) || inside(norm(r.repo.main), f)))?.repo ?? null;
-        // The checkout a space stands in: its live place first, then where it was
-        // made — a shell that cds out of its worktree must not detach it from the
-        // repo, or stop it being a worktree at all.
-        const all = spaces();
-        const bestIn = (s, folder) => {
-          let best = null;
-          for (const w of worktrees) {
-            if ((w.on ?? null) !== (s.machine ?? null)) continue;
-            const p = norm(w.c.path);
-            if (!inside(norm(folder), p)) continue;
-            if (!best || p.length > norm(best.c.path).length) best = w;
-          }
-          return best;
-        };
-        const bestOf = (s) => {
-          const live = bestIn(s, place(s));
-          if (live) return live;
-          // The folder a space was made in is what keeps a worktree a worktree
-          // after its shell walks off. Any other checkout found there is not
-          // evidence of a move: a `cd` to a plain folder must keep the space's
-          // last repo (otherwise every `cd` out of a repo rewrites the tree).
-          const made = bestIn(s, s.folder);
-          return made && !made.c.main ? made : null;
-        };
-        const best = new Map(all.map((s) => [s.id, bestOf(s)]));
-        // The checkout each space stands in, remembered by space: a shell cd to a
-        // plain folder must not erase the repo a space works on, or its worktrees
-        // would fall off the tree.
-        const nextCheckout = new Map();
-        for (const s of all) {
-          const w = best.get(s.id);
-          const prev = this.checkoutById.get(s.id);
-          if (w) {
-            nextCheckout.set(s.id, { main: w.repo.main, path: w.c.path, branch: w.c.branch, linked: !w.c.main });
-          } else if (prev) nextCheckout.set(s.id, prev);
-        }
-        const gitOf = (s) => nextCheckout.get(s.id) ?? null;
-        const checkoutList = worktrees.map((w) => ({
-          path: w.c.path, branch: w.c.branch, main: w.c.main, on: w.on, repoMain: w.repo.main,
-        }));
-        // One tree for both views.
-        const forest = worktreeTree(all, gitOf, checkoutList);
-        this.repos = repos;
-        this.worktrees = nextWorktrees;
-        this.repo = nextRepo;
-        this.worktreeSpaces = forest.worktrees;
-        this.parent = forest.parents;
-        this.checkoutParent = forest.checkoutParents;
-        this.checkoutById = nextCheckout;
-        const cache = {};
-        for (const s of all) {
-          if (!forest.worktrees.has(s.id)) continue;
-          const c = this.checkoutById.get(s.id);
-          cache[cacheKey(s)] = { worktree: true, parent: forest.parents.get(s.id) ?? null, branch: c?.branch ?? null, path: c?.path ?? null };
-        }
-        localStorage.setItem(CACHE_KEY, JSON.stringify(cache));
-      } catch {}
-      this.loaded = true;
-      // Keep the highlighted row if it still exists; otherwise the active space,
-      // never whatever row happens to sit at the old index.
-      const list = this.pickable();
-      if (list.length) {
-        const same = keep ? list.findIndex((r) => this.rowKey(r) === keep) : -1;
-        const active = list.findIndex((r) => r.kind === "space" && r.s.active);
-        this.at = same >= 0 ? same : active >= 0 ? active : Math.min(this.at ?? 0, list.length - 1);
-        if (this.follow) {
-          const i = list.findIndex((r) => r.kind === "space" && r.s.id === this.follow);
-          if (i >= 0) this.at = i;
-        }
-      }
-      const created = shared("worktree.created");
-      if (created) {
-        setShared("worktree.created", null);
-        const at = this.pickable().findIndex((r) => r.kind === "worktree" && r.c.path === created);
-        if (at >= 0) this.at = at;
-      }
-      cx.notify();
+      const rev = shared("workspace.rev") ?? 0;
+      if (now !== closed) { closed = now; seenRev = rev; this.handle.focus(); cx.notify(); }
+      else if (rev !== seenRev) { seenRev = rev; cx.notify(); }
     });
   }
 
+  // A read after an explicit change (a checkout made or removed here): the
+  // sidebar's scanner does the work and writes the shared picture back. This is
+  // never called on open, typing, or a status tick.
+  load(_cx) {
+    this.loadGen = (this.loadGen ?? 0) + 1;
+    askGit(false);
+  }
+
+  // The sidebar's tree. Same git, same checkouts, same parents. A checkout
+  // added or removed over there is this list too. Typing does not change who
+  // holds a checkout, so the tree from the last frame stands.
+  adopt(ps) {
+    const all = this.liveSpaces(ps);
+    const key = pictureKey(ps, all);
+    this.paneSnap = ps;
+    if (key === this.forestSig && this.opened) return;
+    this.forestSig = key;
+    this.treeRows = null;
+    const gitOf = (s) => this.checkoutRecord(s, ps);
+    const checkoutList = listedCheckouts();
+    const forest = worktreeTree(all, gitOf, checkoutList, ps);
+    this.worktreeSpaces = forest.worktrees;
+    this.parent = forest.parents;
+    this.checkoutParent = forest.checkoutParents;
+    this.opened = forest.opened;
+  }
 
   // Keys/clicks call close() with no argument; the app calls close(cx) on teardown.
   // The next open starts clean: no filter, and the active space highlighted.
@@ -217,45 +112,31 @@ export class Palette extends Workspace {
   // Typing: every term has to land somewhere, and terms may land in different
   // places — "kleeamp desk" is the space and its desktop checkout. Exact names
   // and branches outrank a hit deep inside a path; a status word ("needs you")
-  // finds the rows that need you whatever they are called.
+  // finds the rows that need you whatever they are called. The scoring rule is
+  // the engine's, so the sidebar's rows and this sheet rank the same.
   search(q) {
-    const terms = q.split(/\s+/).filter(Boolean);
+    const terms = termsOf(q);
     this.terms = terms;
-    const one = (text, term) => {
-      if (!text) return -Infinity;
-      const t = String(text).toLowerCase();
-      if (t === term) return 100;
-      if (t.startsWith(term)) return 80 - Math.min(10, t.length - term.length);
-      if (t.split(/[\/\s._-]+/).some((w) => w.startsWith(term))) return 60;
-      const i = t.indexOf(term);
-      return i >= 0 ? 40 - Math.min(25, i) : -Infinity;
-    };
-    const best = (fields) => {
-      let total = 0;
-      for (const term of terms) {
-        let hit = -Infinity;
-        for (const [v, w] of fields) {
-          const sc = one(v, term);
-          if (sc > -Infinity) hit = Math.max(hit, sc * w);
-        }
-        if (hit === -Infinity) return -Infinity;
-        total += hit;
-      }
-      return total;
-    };
+    const best = (fields) => scoreTerms(terms, fields);
     const statusWord = (st) => (st === "blocked" ? "needs you" : st ?? "idle");
     const keyOf = (w) => `${w.on ?? ""}\u0000${w.c.path}`;
     const results = [];
-    const listed = this.liveSpaces();
+    // One pane snapshot and one space snapshot for the query. The overview
+    // already took them; asking the host again per row was a full model copy.
+    const ps = this.paneSnap ?? (typeof panes === "function" ? frameCache("panes", panes) : undefined);
+    const listed = this.liveSpaces(ps);
     const listedIds = new Set(listed.map((s) => s.id));
+    const listedAgents = typeof agents === "function" ? agents() : [];
+    const pinned = pinnedList();
+    const trees = this.liveTrees();
     for (const s of listed) {
       const sc = best([
-        [this.spaceName(s), 1], [s.branch, 0.85], [base(place(s)), 0.55], [base(s.folder), 0.55],
+        [this.spaceName(s), 1], [s.branch, 0.85], [base(place(s, ps)), 0.55], [base(s.folder), 0.55],
         [s.machine, 0.5], [statusWord(s.status), 0.5],
       ]);
       if (sc > -Infinity) results.push({ kind: "space", s, score: sc });
     }
-    for (const a of agents()) {
+    for (const a of listedAgents) {
       if (!listedIds.has(a.space)) continue;
       const sc = best([
         [a.program?.name, 1], [a.title, 0.8], [a.space_name, 0.7], [a.tab_name, 0.6],
@@ -263,13 +144,13 @@ export class Palette extends Workspace {
       ]);
       if (sc > -Infinity) results.push({ kind: "agent", a, score: sc });
     }
-    for (const w of this.liveTrees()) {
-      if (w.c.main || openSpaceFor(w.c.path, w.on)) continue;
+    for (const w of trees) {
+      if (w.c.main) continue;
       const sc = best([[w.c.branch, 0.95], [base(w.c.path), 0.7], [w.repo.name, 0.6], ["worktree", 0.5]]);
       if (sc > -Infinity) results.push({ kind: "worktree", c: w.c, repo: w.repo, on: w.on, score: sc });
     }
-    for (const p of pinnedList()) {
-      const live = spaces().some((s) => (p.id ? s.id === p.id
+    for (const p of pinned) {
+      const live = listed.some((s) => (p.id ? s.id === p.id
         : (s.machine ?? null) === (p.machine ?? null) && norm(s.folder ?? "") === norm(p.folder)));
       if (live) continue;
       const sc = best([[p.name, 1], [pinLabel(p), 0.9], [base(p.folder), 0.8], ["pinned", 0.4]]);
@@ -281,14 +162,13 @@ export class Palette extends Workspace {
     // A matched space brings its agents and worktrees with it, so a search reads
     // like the overview tree instead of one bare row per hit. A row already
     // shown under its space is not repeated further down.
-    const all = this.liveSpaces();
     const agentsOf = new Map();
-    for (const a of agents()) {
+    for (const a of listedAgents) {
       if (!agentsOf.has(a.space)) agentsOf.set(a.space, []);
       agentsOf.get(a.space).push(a);
     }
-    const kids = (id) => all.filter((s) => this.parent?.get(s.id) === id);
-    const ckids = (id) => this.liveTrees().filter((w) => !w.c.main && this.checkoutParent?.get(keyOf(w)) === id);
+    const kids = (id) => this.kidsOf(all, id);
+    const ckids = (id) => this.checkoutsOf(all, id, trees);
     const used = new Set();
     const out = [];
     const tree = (s, depth = 0) => {
@@ -311,6 +191,7 @@ export class Palette extends Workspace {
     // A hit is shown with what it belongs to: a branch with the space that holds
     // it, an agent with the space it runs in, a worktree space with its repo. Two
     // bare rows for the same family read as unrelated places.
+    const all = listed;
     const home = (id) => (id ? all.find((s) => s.id === id) ?? null : null);
     // A worktree space is its repo's space; that space is the top of the family.
     // A hit inside a worktree climbs the whole way, so a branch is never drawn as
@@ -362,18 +243,39 @@ export class Palette extends Workspace {
         .child(run)));
   }
 
+  // A space's children in the one order both views draw: worktrees first in the
+  // person's persisted order, then the checkouts nobody opened.
+  kidsOf(all, id) {
+    const parent = all.find((s) => s.id === id);
+    return orderedPaths(groupKeyOf(parent, this.paneSnap),
+      all.filter((s) => this.parent?.get(s.id) === id),
+      (w) => checkoutRecordOf(w)?.root ?? "");
+  }
+
+  checkoutsOf(all, id, trees = this.liveTrees()) {
+    const parent = all.find((s) => s.id === id);
+    const groupKey = groupKeyOf(parent, this.paneSnap);
+    const list = trees.filter((w) => !w.c.main && this.checkoutParent?.get(`${w.on ?? ""}\u0000${w.c.path}`) === id);
+    return orderedPaths(groupKey, list, (w) => w.c.path);
+  }
+
   rows() {
+    // The same forest the sidebar draws, before the filter or the sections, so
+    // a search and the overview cannot disagree about who holds a checkout.
+    const ps = typeof panes === "function" ? frameCache("panes", panes) : undefined;
+    this.adopt(ps);
     const f = this.filter.trim().toLowerCase();
     if (f) return this.search(f);
     // No query: nothing is a match, so no row is drawn as one.
     this.terms = null;
     const out = [];
     const head = (label) => out.push({ kind: "head", label });
-    const all = this.liveSpaces();
+    const all = this.liveSpaces(ps);
+    const agentList = agents();
     const active = all.find((s) => s.active);
     const keyOf = (w) => `${w.on ?? ""}\u0000${w.c.path}`;
-    const kids = (id) => all.filter((s) => this.parent?.get(s.id) === id);
-    const ckids = (id) => this.liveTrees().filter((w) => !w.c.main && this.checkoutParent?.get(keyOf(w)) === id);
+    const kids = (id) => this.kidsOf(all, id);
+    const ckids = (id) => this.checkoutsOf(all, id);
     const parentOf = (s) => { const id = this.parent?.get(s.id); return id ? all.find((x) => x.id === id) : null; };
     const emitted = new Set();
     // `seen` is the section's own list: Pinned and Current both show the one
@@ -383,7 +285,7 @@ export class Palette extends Workspace {
       seen.add(s.id);
       emitted.add(s.id);
       // What runs there, so the overview shows agents next to their worktrees.
-      for (const a of agents()) if (a.space === s.id) out.push({ kind: "agent", a, depth: depth + 1 });
+      for (const a of agentList) if (a.space === s.id) out.push({ kind: "agent", a, depth: depth + 1 });
       for (const k of kids(s.id)) if (!seen.has(k.id)) emit(k, depth + 1, seen);
       for (const w of ckids(s.id)) {
         if (seen.has(keyOf(w))) continue;
@@ -501,18 +403,56 @@ export class Palette extends Workspace {
   }
 
   // Ctrl+Shift+J/K: the sheet steps through every space of the machine; the
-  // sidebar's sections are not its order.
+  // sidebar's sections are not its order. A worktree checkout steps inside its
+  // repo group, through the persisted worktree order.
+  //
+  // The subject is the space the reorder is about, not "whatever row the
+  // highlight is on now". A row moves asynchronously, so a key press that lands
+  // before the sheet repainted still sees the highlight on the *index* it had,
+  // which is now a different space — that is how a held key walked two spaces at
+  // once. While a step is in flight, keep stepping its own space.
   beginReorder(dir, cx) {
-    const r = this.selected();
+    // A checkout step in flight keeps its own path for the same reason.
+    const moving = this.pathSubject();
+    if (moving) {
+      return this.startPathReorder(this.pathGroup, moving, this.pathPaths ?? [], dir, cx, this.pathAfter);
+    }
+    const held = this.reorderSubject();
+    const r = held ? { kind: "space", s: held } : this.selected();
+    if (r?.kind === "worktree" || (r?.kind === "space" && this.isWorktree(r.s))) {
+      return this.reorderWorktreeRow(r, dir, cx);
+    }
     const s = r?.kind === "space" ? r.s : null;
     if (!s) return;
     this.startReorder(s, dir, {
-      ids: () => spaces().filter((x) => (x.machine ?? null) === (s.machine ?? null)).map((x) => x.id),
+      ids: (list = spaces()) => list.filter((x) => (x.machine ?? null) === (s.machine ?? null) && !this.isWorktree(x)).map((x) => x.id),
       after: (moved, step, total) => {
         this.follow = moved.id;
         if (this.filter.trim()) this.note = `${moved.name} \u00b7 ${step} of ${total}`;
       },
     }, cx);
+  }
+
+  reorderWorktreeRow(r, dir, cx) {
+    const all = this.liveSpaces(this.paneSnap);
+    const list = listedCheckouts();
+    const s = r.kind === "space" ? r.s : null;
+    const rec = s ? checkoutRecordOf(s) : null;
+    let groupKey = rec?.groupKey ?? (s ? groupKeyOf(s, this.paneSnap) : null);
+    let path = rec?.root ?? null;
+    if (r.kind === "worktree") {
+      const c = list.find((x) => (x.on ?? null) === (r.on ?? null) && tidyPath(x.path) === tidyPath(r.c.path));
+      groupKey = `${r.on ?? ""}${SEP}${tidyPath(c?.repoMain ?? "")}`;
+      path = r.c.path;
+    }
+    if (!groupKey || !path) return;
+    const paths = this.pathSiblings(groupKey, all, list);
+    this.startPathReorder(groupKey, path, paths, dir, cx, (moved, step, total) => {
+      const hit = all.find((x) => tidyPath(checkoutRecordOf(x)?.root ?? "") === moved);
+      if (hit) { this.follow = hit.id; this.followPath = null; }
+      else { this.follow = null; this.followPath = moved; }
+      if (this.filter.trim()) this.note = `${base(moved)} \u00b7 ${step} of ${total}`;
+    });
   }
 
   // The sheet reads pinned spaces above the rest, so crossing that line is a
@@ -525,8 +465,8 @@ export class Palette extends Workspace {
   // the same scan the tree is built from.
   worktreeName(s) {
     if (!this.isWorktree(s)) return null;
-    const c = this.checkoutById?.get(s.id);
-    return c?.branch ?? (c?.path ? base(c.path) : null);
+    const c = this.checkoutRecord(s, this.paneSnap);
+    return c?.branch ?? (c?.root ? base(c.root) : null) ?? (s?.folder ? base(s.folder) : null);
   }
 
   // The sheet closes before it acts; the sidebar leaves the keyboard to the pane.
@@ -542,21 +482,45 @@ export class Palette extends Workspace {
   // What the sheet lists. A checkout the worktrees dialog has already taken away
   // is not a row any more, even while git is still working on it: it was asked
   // for, so it must not read as still there.
-  liveSpaces() {
+  liveSpaces(ps = panes()) {
     // A checkout on its way out hides its space wherever that space's shell is:
-    // the live place first, and the folder it was made in too.
-    return spaces().filter((s) => !isRemoving(place(s), s.machine) && !isRemoving(s.folder, s.machine));
+    // the live place first, and the folder it was made in too. One pane snapshot
+    // for the whole list: `place` copies it out of the host on every call.
+    // One list per snapshot: the overview, the search and the header all read it.
+    if (this._live && this._livePs === ps) return this._live;
+    const list = frameCache("spaces", spaces).filter((s) => !isRemoving(place(s, ps), s.machine) && !isRemoving(s.folder, s.machine));
+    this._live = list;
+    this._livePs = ps;
+    return list;
   }
 
   liveTrees() {
-    return this.worktrees.filter((w) => !isRemoving(w.c.path, w.on));
+    // The sidebar's checkout list, minus a checkout already open as a space and
+    // minus one the dialog has already taken away. A failed removal leaves the
+    // list alone, so the row comes back here the moment it comes back there.
+    // One pass per tree: a search asks for this from every row.
+    if (this.treeRows) return this.treeRows;
+    const opened = this.opened;
+    const rows = [];
+    for (const c of listedCheckouts()) {
+      if (c.main || isRemoving(c.path, c.on)) continue;
+      if (opened?.has(`${c.on ?? ""}\u0000${norm(c.path).replace(/\/+$/, "")}`)) continue;
+      rows.push({
+        c: { path: c.path, branch: c.branch, main: false },
+        repo: { main: c.repoMain, name: base(c.repoMain ?? "") },
+        on: c.on ?? null,
+      });
+    }
+    this.treeRows = rows;
+    return rows;
   }
 
   // "Spaces" means places to work: a worktree checkout is drawn under its repo,
   // and counting it again read as a space nobody could see. Agents are not
   // spaces either, however many are running.
   realSpaces() {
-    return spaces().filter((s) => !this.isWorktree(s));
+    const list = this._live ?? frameCache("spaces", spaces);
+    return list.filter((s) => !this.isWorktree(s));
   }
 
   // The wheel moves the view; the highlight goes with it, so Enter still acts
@@ -591,8 +555,8 @@ export class Palette extends Workspace {
       const h = v.H[v.rows[i].kind] ?? 32;
       if (y >= v.tops[i] && y < v.tops[i] + h) { hit = v.rows[i]; break; }
     }
-    const from = spaces().find((x) => x.id === this.pressed);
-    const same = hit && hit.kind === "space" && (hit.s.machine ?? null) === (from?.machine ?? null);
+    const from = this.liveSpaces(this.paneSnap).find((x) => x.id === this.pressed);
+    const same = hit && hit.kind === "space" && !this.isWorktree(hit.s) && (hit.s.machine ?? null) === (from?.machine ?? null);
     const id = same ? hit.s.id : null;
     if (this.over !== id) { this.over = id; cx.notify(); }
   }
@@ -603,11 +567,15 @@ export class Palette extends Workspace {
     this.pressed = null;
     this.over = null;
     if (from !== null && over && over !== from) {
-      const order = spaces().filter((x) => (x.machine ?? null) === (spaces().find((y) => y.id === from)?.machine ?? null)).map((x) => x.id);
+      const all = this.liveSpaces(this.paneSnap);
+      const machine = all.find((y) => y.id === from)?.machine ?? null;
+      // The visual list: spaces of this machine, no worktrees. `space.move`
+      // indexes this list, not the raw `spaces()` array.
+      const order = all.filter((x) => (x.machine ?? null) === machine && !this.isWorktree(x)).map((x) => x.id);
       // Dropped onto a row below its own: it goes after that row, the side the
       // drop line was drawn on.
-      this.landSpace(spaces().find((x) => x.id === from), spaces().find((x) => x.id === over),
-        order.indexOf(over) > order.indexOf(from) ? 1 : -1);
+      const a = order.indexOf(from), b = order.indexOf(over);
+      if (a >= 0 && b >= 0) this.landSpace(all.find((x) => x.id === from), all.find((x) => x.id === over), b > a ? 1 : -1);
     }
     cx.notify();
   }
@@ -617,8 +585,11 @@ export class Palette extends Workspace {
   // nothing.
   // A drag lands where it was let go, through the same step the keys use.
   landSpace(s, target, dir = 0) {
-    if (!s || !target) return null;
-    const ids = spaces().filter((x) => (x.machine ?? null) === (s.machine ?? null)).map((x) => x.id);
+    if (!s || !target || this.isWorktree(s) || this.isWorktree(target)) return null;
+    if ((s.machine ?? null) !== (target.machine ?? null)) return null;
+    const ids = this.liveSpaces(this.paneSnap)
+      .filter((x) => (x.machine ?? null) === (s.machine ?? null) && !this.isWorktree(x))
+      .map((x) => x.id);
     const place = this.landReorder(s, target, ids, dir);
     if (place !== null) this.follow = s.id;
     return place;
@@ -642,7 +613,13 @@ export class Palette extends Workspace {
 
 
   render(cx) {
-    const ids = spaces().map((s) => s.id);
+    beginPaint();
+    try {
+    const listed = frameCache("spaces", spaces);
+    const ids = listed.map((s) => s.id);
+    // Subscribes this overlay to the sidebar's picture. A notify over there
+    // does not reach here; the revision does.
+    this.seenRev = shared("workspace.rev") ?? 0;
     // A fresh open starts clean and on the active space, even when this copy
     // lived through the previous open. Spaces made while it was closed are not
     // news: only one made while it is open closes it.
@@ -662,11 +639,26 @@ export class Palette extends Workspace {
       return div();
     }
     this.seen = new Set(ids);
-    // Reordering spaces only changes the list order, not the worktrees: keep the
-    // signature order-free so a move does not re-read git or flash row icons.
-    const sig = spaces().map((s) => `${s.id}:${s.folder}:${s.machine ?? ""}:${s.branch ?? ""}`).sort().join("|");
-    if (this.spaceSig !== undefined && sig !== this.spaceSig) this.load(cx);
-    this.spaceSig = sig;
+    // A worktree just made is a row in this frame. The flag stays put: the
+    // sidebar reads it too, and nulling it here is how the sidebar used to miss it.
+    // This is an explicit creation, so asking the scanner once is correct — the
+    // open path and every status tick never do.
+    const createdAt = shared("worktree.createdAt") ?? 0;
+    if (createdAt !== (this.createdAt ?? 0)) {
+      this.createdAt = createdAt;
+      const created = shared("worktree.created");
+      if (createdAt && typeof created === "string") {
+        this.followCreated = created;
+        this.noteCreated(created, createdAt);
+        this.load(cx);
+      }
+    }
+    // A removal changed. The row hides while it is in progress (isRemoving) and
+    // comes back if git refuses, because the checkout list is only edited when
+    // the removal succeeds — the same list the sidebar draws.
+    const removingNow = removingList().map((r) => `${r.machine ?? ""}\u0000${tidyPath(r.path)}`).sort().join("|");
+    if (this.removingNow !== undefined && removingNow !== this.removingNow) this.load(cx);
+    this.removingNow = removingNow;
     const t = theme();
     // Whether the keyboard is on the panel, which the caret and border follow.
     const live = Boolean(this.handle?.is_focused?.());
@@ -686,7 +678,33 @@ export class Palette extends Workspace {
       const i = pick.findIndex((r) => r.kind === "space" && r.s.id === this.follow);
       if (i >= 0) this.at = i;
     }
+    // A checkout just moved keeps the highlight too.
+    if (this.followPath) {
+      const i = pick.findIndex((r) => r.kind === "worktree" && tidyPath(r.c?.path) === tidyPath(this.followPath));
+      if (i >= 0) { this.at = i; this.followPath = null; }
+    }
+    // The checkout just made, once the shared list actually has its row.
+    if (this.followCreated) {
+      const path = tidyPath(this.followCreated);
+      const at = pick.findIndex((r) => r.kind === "worktree" && tidyPath(r.c?.path) === path);
+      if (at >= 0) {
+        this.at = at;
+        this.followCreated = null;
+      }
+    }
     if (pick.length) this.at = Math.min(this.at, pick.length - 1);
+    // Ctrl+J/K arrived as a shared write, which is what repainted this sheet.
+    // Move before the rows are drawn so this paint is the one that shows it.
+    const steps = this.pendingSteps();
+    if (steps && pick.length) {
+      this.stopReorder();
+      this.follow = null;
+      let at = this.at ?? 0;
+      const count = Math.min(Math.abs(steps), pick.length);
+      const dir = steps > 0 ? 1 : -1;
+      for (let i = 0; i < count; i++) at = (at + (dir > 0 ? 1 : pick.length - 1)) % pick.length;
+      this.at = at;
+    }
     const sel = pick[this.at];
     const H = { head: 30, space: 36, pin: 36, worktree: 34, agent: 38 };
     const tops = [];
@@ -713,6 +731,21 @@ export class Palette extends Workspace {
     // 16px slot on every row, so they line up down the list.
     const marker = (el) => div().w(16).h_full().flex_none().flex().items_center().justify_center().child(el);
 
+    // Where a dragged space sits among the spaces of its machine, worktrees
+    // aside: the same list `space.move` indexes. A drop line compares these
+    // places, never raw `spaces()` indices (which count every repo and machine).
+    const visual = new Map();
+    {
+      const counts = new Map();
+      for (const r of rows) {
+        if (r.kind !== "space" || this.isWorktree(r.s) || visual.has(r.s.id)) continue;
+        const m = r.s.machine ?? null;
+        const n = counts.get(m) ?? 0;
+        counts.set(m, n + 1);
+        visual.set(r.s.id, { m, n });
+      }
+    }
+
     const row = (r) => {
       if (r.kind === "head") {
         const m = String(r.label).match(/^(.*?)\s+(\d+)$/);
@@ -724,28 +757,45 @@ export class Palette extends Workspace {
       const on = r === sel;
       if (r.kind === "space") {
         const s = r.s;
+        const branch = this.spaceGit(s, this.paneSnap)?.branch ?? s.branch;
         return h_flex().id(`pal-${r.inPins ? "pin-" : ""}${s.id}`).relative().mx(4).pl(10 + (r.depth ?? 0) * 16).pr(10).h(36).rounded(9).gap(9).items_center()
           .when(on, (el) => el.bg(wash(t.accent, "16")))
           .when(!on, (el) => el.hover((x) => x.bg(wash(t.foreground, "0b"))))
           .when(this.pressed === s.id, (el) => el.opacity(0.55))
           .when(this.pressed !== null && this.over === s.id && this.pressed !== s.id, (el) => el.child(
             div().absolute().left(0).right(0).h(2).rounded(1).bg(t.accent)
-              .when(spaces().findIndex((x) => x.id === this.pressed) < spaces().findIndex((x) => x.id === s.id), (line) => line.bottom(0))
-              .when(spaces().findIndex((x) => x.id === this.pressed) > spaces().findIndex((x) => x.id === s.id), (line) => line.top(0)),
+              .when((visual.get(this.pressed)?.m === visual.get(s.id)?.m) && (visual.get(this.pressed)?.n ?? 0) < (visual.get(s.id)?.n ?? 0), (line) => line.bottom(0))
+              .when((visual.get(this.pressed)?.m === visual.get(s.id)?.m) && (visual.get(this.pressed)?.n ?? 0) > (visual.get(s.id)?.n ?? 0), (line) => line.top(0)),
           ))
-          .on_mouse_down("left", (_e, cx) => { this.pressed = s.id; this.over = s.id; cx.notify(); })
+          .on_mouse_down("left", (_e, cx) => {
+            if (this.isWorktree(s)) return;
+            this.pressed = s.id; this.over = s.id; cx.notify();
+          })
           .on_mouse_move((_e, cx) => {
-            const from = spaces().find((x) => x.id === this.pressed);
+            if (this.isWorktree(s)) {
+              if (this.over === s.id) { this.over = null; cx.notify(); }
+              return;
+            }
+            const from = this.liveSpaces(this.paneSnap).find((x) => x.id === this.pressed);
             const same = from && (from.machine ?? null) === (s.machine ?? null);
             if (this.pressed !== null && same && this.over !== s.id) { this.over = s.id; cx.notify(); }
           })
           .on_mouse_up("left", (_e, cx) => {
+            if (this.isWorktree(s)) {
+              const from = this.pressed;
+              this.pressed = null;
+              this.over = null;
+              if (from == null) this.openRow(this.paletteRow(r));
+              cx.notify();
+              return;
+            }
             const from = this.pressed, over = this.over;
             this.pressed = null;
             this.over = null;
             if (from === s.id) this.openRow(this.paletteRow(r));
             else if (from !== null && over === s.id) {
-              this.landSpace(spaces().find((x) => x.id === from), s);
+              const live = this.liveSpaces(this.paneSnap);
+              this.landSpace(live.find((x) => x.id === from), s);
             }
             cx.notify();
           })
@@ -758,8 +808,8 @@ export class Palette extends Workspace {
           .child(this.label(this.spaceName(s), t, 12.5, s.active ? t.foreground : t.muted, s.active))
           .when(s.active, (el) => el.child(div().flex_none().px(5).h(15).rounded(4).bg(wash(t.accent, "18"))
             .text_size(9).font_medium().text_color(t.accent).flex().items_center().child("current")))
-          .when(Boolean(s.branch) && s.branch !== s.name && !this.isWorktree(s), (el) => el.child(div().flex_none().max_w(130).truncate().px(5).h(17).rounded(4)
-            .bg(wash(t.foreground, "0c")).text_size(9.5).text_color(wash(t.muted, "cc")).flex().items_center().child(s.branch)))
+          .when(Boolean(branch) && branch !== s.name && !this.isWorktree(s), (el) => el.child(div().flex_none().max_w(130).truncate().px(5).h(17).rounded(4)
+            .bg(wash(t.foreground, "0c")).text_size(9.5).text_color(wash(t.muted, "cc")).flex().items_center().child(branch)))
           .when(Boolean(s.machine), (el) => el.child(div().flex_none().max_w(90).truncate().text_size(9.5).text_color(wash(t.muted, "cc")).child(s.machine)))
           .child(marker(Boolean(r.inPins) && !this.isWorktree(s) && Boolean(this.spacePin(s))
             ? svg("mods/agents-list/pin.svg").size(12).flex_none().text_color(wash(t.accent, "8c"))
@@ -851,7 +901,7 @@ export class Palette extends Workspace {
       if (sel?.kind === "pin") return [{ k: "↵", l: "open shell" }, { k: "⌃P", l: "unpin" }];
       if (sel?.kind === "worktree") return [{ k: "↵", l: "open" }, { k: "⌃A", l: "worktree" }, { k: "⌃D", l: "remove" }];
       if (sel?.kind === "agent") {
-        const s = spaces().find((x) => x.id === sel.a.space);
+        const s = frameCache("spaces", spaces).find((x) => x.id === sel.a.space);
         return [
           { k: "↵", l: "focus" },
           { k: "⌃A", l: "worktree" },
@@ -865,7 +915,8 @@ export class Palette extends Workspace {
     // One chip per state that has something in it: the panel opens saying where
     // the work is, and a chip is also the filter it names.
     const tally = { "needs you": 0, working: 0, done: 0 };
-    for (const s of this.realSpaces()) {
+    const places = this.realSpaces();
+    for (const s of places) {
       const word = s.status === "blocked" ? "needs you" : (s.status ?? "idle");
       if (word in tally) tally[word] += 1;
     }
@@ -936,7 +987,7 @@ export class Palette extends Workspace {
             .child(div().flex_none().text_size(10).text_color(t.muted)
               .child(this.filter.trim()
                 ? `${rows.filter((r) => r.hit).length} ${rows.filter((r) => r.hit).length === 1 ? "match" : "matches"}`
-                : `${this.realSpaces().length} ${this.realSpaces().length === 1 ? "space" : "spaces"}`))
+                : `${places.length} ${places.length === 1 ? "space" : "spaces"}`))
             .when(tally["needs you"] > 0, (el) => el.child(chip("needs you")))
             .when(tally.working > 0, (el) => el.child(chip("working")))
             .when(tally.done > 0, (el) => el.child(chip("done")))))
@@ -973,7 +1024,12 @@ export class Palette extends Workspace {
           })
           .child(svg("mods/agents-list/x.svg").size(12)))))
       .child(v_flex().id("pal-list")
-        .on_size_change((size, cx) => { this.listHeight = size.height / settings().zoom; cx.notify(); })
+        .on_size_change((size, cx) => {
+          const next = size.height / (settings().zoom || 1);
+          if (this.listHeight != null && Math.abs(this.listHeight - next) < 0.5) return;
+          this.listHeight = next;
+          cx.notify();
+        })
         .on_scroll_wheel((e, cx) => this.wheel(e, cx))
         .on_mouse_move((e, cx) => this.overRow(e, cx))
         .on_mouse_up("left", (_e, cx) => this.dropRow(cx))
@@ -1006,5 +1062,6 @@ export class Palette extends Workspace {
         .children(hints.map((h) => h_flex().flex_none().gap(5).items_center()
           .child(keycap(t, h.k))
           .child(div().text_size(10).text_color(t.muted).child(h.l)))));
+    } finally { endPaint(); }
   }
 }

@@ -6,7 +6,7 @@
 // happened. The order of two branches in a long else-if chain is invisible in
 // review and invisible to every other test, and it costs a person their keys.
 //
-// Now the map lives once, in core.js, and both views call it. A view that wrote
+// Now the map lives once, in workspace-engine.js, and both views call it. A view that wrote
 // its own map again — the thing this test exists for — is caught here too.
 //
 //   node tests/keys.test.mjs
@@ -17,10 +17,12 @@ import { fileURLToPath } from "node:url";
 
 const root = process.env.PALETTE_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => readFileSync(join(root, file), "utf8");
-const core = read("mods/agents-list/core.js");
+const core = read("mods/agents-list/workspace-engine.js");
 const palette = read("mods/agents-list/palette.js");
 const side = read("mods/agents-list/sidebar.js");
 const foot = read("mods/footer/main.js");
+const host = read("mods/handle/main.js");
+const sheet = read("mods/shortcuts/main.js");
 
 let failures = 0;
 const check = (label, ok, extra = "") => {
@@ -39,7 +41,10 @@ const worktree = at('if (k === "a")');
 check("Ctrl+Shift+J/K reorders", shiftBranch > 0);
 check("the plain Ctrl+J/K branch comes after it", walkBranch > 0 && shiftBranch < walkBranch,
   "Ctrl+Shift+J/K would be swallowed by the Ctrl+J/K branch");
-check("the reorder branch calls beginReorder", /if \(m\.shift[\s\S]{0,120}this\.beginReorder\(/.test(core));
+check("the reorder branch calls beginReorder", /if \(m\.shift[\s\S]{0,420}this\.beginReorder\(/.test(core));
+// The OS key repeat is not a second source of steps: `startReorder` repeats the
+// held step itself, and counting both made a held key move two rows at a time.
+check("a held key does not step twice per repeat", /if \(!e\.is_held\) this\.beginReorder\(/.test(core));
 check("the walk branch calls walk", /if \(k === "j" \|\| k === "k"\)[\s\S]{0,80}this\.walk\(/.test(core));
 check("the sheet's other chords are in the shared map",
   pin > 0 && rename > 0 && close > 0 && worktree > 0);
@@ -65,11 +70,26 @@ check("the sidebar reads the shared map before the modifier return",
   sideChord > 0 && sideReturn > 0 && sideChord < sideReturn,
   "the chords would fall through to the app");
 
-// Ctrl+J/K are bound to the footer's dir commands, so a view cannot see them:
-// it says where the keyboard is, and the footer hands the walk back. Without
-// this the sidebar with the keyboard walks panes instead of its own rows.
-check("the footer gives Ctrl+J/K to the sidebar while it has the keyboard",
+// Ctrl+J/K are bound to the handle's dir commands. The footer and the terminals
+// list are hidden with the sidebar and again on the rail, so they never see the
+// key then. The left handle stays shown and hands the walk back. The footer
+// keeps the same hand-off for a key someone rebound onto it.
+check("the handle gives Ctrl+J/K to the sidebar while it has the keyboard",
+  /else if \(shared\("sidebar\.kb"\)\) setShared\("sidebar\.move"/.test(host));
+check("only the left handle listens, so the two copies do not both step",
+  /edge !== "left"/.test(host) && /nextCommand\(/.test(host) && /tries < 20/.test(host));
+check("the layout points the walk, the flip and the closes at the handle",
+  JSON.parse(read("keys.json"))["layout:workspace"]["ctrl-j"] === "handle.dir_down"
+  && JSON.parse(read("keys.json"))["layout:workspace"]["ctrl-shift-m"] === "handle.flip_layout"
+  && JSON.parse(read("keys.json"))["layout:workspace"]["ctrl-shift-x"] === "handle.close_pane");
+check("the footer still hands a rebound Ctrl+J/K to the sidebar",
   /else if \(shared\("sidebar\.kb"\)\) setShared\("sidebar\.move"/.test(foot));
+check("the keys sheet drops a global binding a layout section replaces",
+  /b\.section === "global" && layoutKeys\.has\(b\.keys\)/.test(sheet));
+check("a sub-agent fold is painted with the theme it closes over",
+  /plainFold\(t, a, subs\)/.test(side) && /this\.plainFold\(t, a, subs\)/.test(side));
+check("an agent row never focuses a missing pane",
+  !/pane\.focus", \{ pane: a\.pane \}/.test(side) && /this\.focusAgent\(a\)/.test(side));
 check("the sidebar says where the keyboard is",
   /setShared\("sidebar\.kb", here\)/.test(side));
 check("the sidebar polls for the handed-back walk only while focused",

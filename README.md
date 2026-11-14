@@ -110,23 +110,33 @@ The layout ships nine mods as parts of itself, not separate downloads:
 
 | Mod | What it is |
 |---|---|
-| `agents-list` | The sidebar: spaces, worktrees, the AGENTS list, pins, sort; and the `Alt+F` find sheet, which is the same logic drawn as a sheet (`core.js` is shared). |
+| `agents-list` | The sidebar: spaces, worktrees, the AGENTS list, pins, sort; and the `Alt+F` find sheet, which is the same logic drawn as a sheet (`workspace-engine.js` is shared). |
 | `terminals-list` | The TERMINALS list for the active space, plus Files / Changes / new terminal. |
-| `footer` | The footer strip; `Ctrl+J`/`Ctrl+K`, layout flip, new worktree, closing dead spaces. |
+| `footer` | The footer strip, and closing dead spaces. `Ctrl+J`/`Ctrl+K`, the layout flip and a new worktree are answered here only when a key is rebound onto the footer. |
 | `icons` | Icons shared by the other mods, and an optional top bar. |
 | `shortcuts` | The searchable shortcut sheet. |
 | `worktrees` | New / open / remove worktree dialogs and stop confirmations. |
 | `sidebar-menu` | Right-click the sidebar: move it to the other side, or hide it. |
-| `handle` | The floating tab at the window edge while the sidebar is hidden. |
+| `handle` | The floating tab at the window edge while the sidebar is hidden. The left copy also takes `Ctrl+J`/`Ctrl+K`, the layout flip, a new worktree, and close pane/tab, so those keys work while the sidebar is hidden or folded to the rail. |
 | `pane-header` | An optional pane header. **Unused by this layout.** |
 
 Each folder is self-contained and can be copied into another Herdr home. The
 sidebar and its `Alt+F` find sheet are one mod (`agents-list`): Herdr only lets a
-mod import its own folder, so the logic they share lives in `core.js`, the two
+mod import its own folder, so the logic they share lives in `workspace-engine.js`, the two
 drawings in `sidebar.js` and `palette.js`. `agents-list`, `terminals-list` and
 `footer` also open dialogs from `worktrees`, so take that with them. Some icons are borrowed
 from Herdr's own mod folders (`workspace-chrome`, `files`, `changes`, `pane`,
 `tabs`) and are referenced, never copied.
+
+The engine also owns the shared picture in `shared.json` (`workspace.state`): the
+git summaries and checkout lists one scanner reads, a sticky `space → repo/worktree`
+record, and each repo's worktree order. The sidebar writes it; the `Alt+F` sheet
+reads it on its first frame, so opening the sheet runs no `git` and cannot stall.
+A worktree stays bound to its parent after its shell `cd`s into the main
+checkout, a subfolder or a non-repo folder; only a different repository root
+re-binds the space. Nested worktrees reorder through that persisted per-repo
+order (`Ctrl+Shift+J`/`K` or a drag), never through `space.move`, which is for
+spaces and is scoped to one machine's block.
 
 ## Checks
 

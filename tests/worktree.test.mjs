@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const root = process.env.WORKTREE_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (file) => readFileSync(join(root, file), "utf8");
-const core = read("mods/agents-list/core.js");
+const core = read("mods/agents-list/workspace-engine.js");
 const palette = read("mods/agents-list/palette.js");
 const sidebar = read("mods/agents-list/sidebar.js");
 
@@ -52,7 +52,7 @@ const constant = (name) => {
 
 const norm = (p) => (p ?? "").replace(/\\/g, "/");
 const base = (p) => norm(p).replace(/\/+$/, "").split("/").pop() ?? "";
-const factory = new Function("norm", "base", "shared", "place",
+const factory = new Function("norm", "base", "shared", "place", "spaceRecord",
   `${constant("inside")}\n${lift(core, "openSpaceFor")}\n${lift(core, "worktreeTree")}\n
    return { openSpaceFor, worktreeTree, inside };`);
 const shared = () => undefined;
@@ -64,7 +64,7 @@ const repo = { id: "r", name: "cliamp", folder: "/home/taha/.config/herdr-app", 
 // A worktree whose shell cd'd out: place() says /tmp, its folder says the checkout.
 const wt = { id: "t", name: "tmp", folder: tree, live: "/tmp", machine: null };
 
-const make = (spaces, trees) => factory(norm, base, shared, (s) => (s.live ?? s.folder)).worktreeTree(
+const make = (spaces, trees) => factory(norm, base, shared, (s) => (s.live ?? s.folder), () => null).worktreeTree(
   spaces,
   (s) => (s.id === "r"
     ? { main, root: main, linked: false, branch: "main" }
@@ -89,7 +89,7 @@ check("a checkout that already has a space is not listed a second time",
   !out.checkoutParents.has(`\u0000${tree}`), JSON.stringify([...out.checkoutParents]));
 
 // A shell that wandered off still finds the space standing in its checkout.
-const { openSpaceFor } = factory(norm, base, shared, (s) => (s.live ?? s.folder));
+const { openSpaceFor } = factory(norm, base, shared, (s) => (s.live ?? s.folder), () => null);
 check("opening a checkout goes to the space standing there, even after a cd",
   openSpaceFor(tree, null, [repo, wt], []).id === "t");
 check("opening a checkout nobody stands in finds no space",
@@ -106,20 +106,39 @@ check("the sheet answers with the checkout's branch",
   /worktreeName\(s\) \{[\s\S]{0,260}return c\?\.branch/.test(palette));
 
 // Opening a checkout names the new space, or Herdr renames it on the first cd.
-check("opening a checkout names the space after its branch",
-  /const name = r\.c\?\.branch \?\? r\.branch \?\? base\(r\.path\);[\s\S]{0,180}run\("space\.new", \{ folder: r\.path, name/.test(core));
-check("the worktrees dialog names the space it opens too",
-  /const name = c\.branch \?\? c\.path\.split\("\/"\)\.pop\(\);[\s\S]{0,120}run\("space\.new", \{ folder: c\.path, machine: this\.on, name \}\)/.test(read("mods/worktrees/main.js")));
+check("opening a checkout names the space after its branch, on this computer when it is local",
+  /const name = r\.c\?\.branch \?\? r\.branch \?\? base\(r\.path\);[\s\S]{0,280}run\("space\.new", \{ folder: r\.path, name, machine: r\.on \?\? "" \}\)/.test(core));
+check("a pin opens on this computer when it names no machine",
+  /run\("space\.new", \{ folder: p\.folder, \.\.\.\(p\.named \? \{ name: p\.name \} : \{\}\), machine: p\.machine \?\? "" \}\)/.test(core));
+check("the worktrees dialog names the space it opens too, on this computer when it is local",
+  /const name = c\.branch \?\? c\.path\.split\("\/"\)\.pop\(\);[\s\S]{0,220}run\("space\.new", \{ folder: c\.path, name, machine: this\.on \?\? "" \}\)/.test(read("mods/worktrees/main.js")));
+check("a space standing in a worktree still refreshes that repo's checkouts",
+  !/main === root/.test(sidebar) && /const treesBefore = JSON\.stringify\(this\.trees\[repoKey\] \?\? null\)/.test(sidebar));
+check("a failed checkout read is not an empty repo",
+  /if \(!list\.ok\) return null;/.test(core));
 check("Enter in the open dialog opens the checkout, never makes one",
   /this\.input\.on\("submit", \(_e, cx\) => \{[\s\S]{0,120}if \(this\.opening\) this\.open\(this\.shown\(\)\[this\.at\]\);[\s\S]{0,80}else this\.go\(cx\);/.test(read("mods/worktrees/main.js")));
 check("a worktree's removal points at its checkout, not its shell's folder",
-  /const folder = tree \? \(inWorktrees\(s\.folder\) \? s\.folder : \(place\(s\) \?\? s\.folder\)\) : null;/.test(core));
+  /const folder = tree \? \(rec\?\.root \?\? \(inWorktrees\(s\.folder\) \? s\.folder : \(place\(s\) \?\? s\.folder\)\)\) : null;/.test(core));
 
 // One tree, both views: neither keeps its own parent map builder.
 check("the sidebar builds no tree of its own",
-  !/const parentOf = \(s\) => \{[\s\S]{0,80}info\.get\(s\.id\)/.test(sidebar) && /worktreeTree\(allSpaces, gitOf, trees\)/.test(sidebar));
+  !/const parentOf = \(s\) => \{[\s\S]{0,80}info\.get\(s\.id\)/.test(sidebar) && /worktreeTree\(allSpaces, gitOf, trees, paneList\)/.test(sidebar));
 check("the sheet builds no tree of its own",
-  /worktreeTree\(all, gitOf, checkoutList\)/.test(palette) && !/nextParent\.set/.test(palette));
+  /worktreeTree\(all, gitOf, checkoutList, ps\)/.test(palette) && !/nextParent\.set/.test(palette));
+check("the sheet and the sidebar draw one checkout list",
+  /const checkoutList = listedCheckouts\(\)/.test(palette)
+  && /const trees = listedCheckouts\(\)/.test(sidebar)
+  && !/this\.worktrees = \(this\.worktrees/.test(palette));
+check("git is watched in the git dir, not the working tree",
+  /this\.watchRepo\(cx, `repo:\$\{main\}`, gitDir \|\| `\$\{main\}\/\.git`, main\)/.test(sidebar)
+  && !/watchRepo\(cx, "worktrees"/.test(sidebar));
+check("reordering spaces does not rescan git",
+  /frameCache\("spaces", spaces\)\.map\(\(s\) => s\.id\)\.sort\(\)\.join\(","\)/.test(sidebar));
+check("one git scan runs at a time",
+  /if \(this\.gitRunning\)/.test(sidebar));
+check("a stale sheet read cannot overwrite a newer one",
+  /this\.loadGen/.test(palette));
 
 console.log(failures ? `\n${failures} worktree check(s) failed` : "all worktree checks passed");
 process.exit(failures ? 1 : 0);

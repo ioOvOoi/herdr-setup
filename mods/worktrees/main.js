@@ -345,6 +345,8 @@ export default class Worktree extends View {
     // A layout without the sidebar has nobody to take the job, so this dialog
     // stays and runs it. The checkout is hidden either way.
     if (!shownBy(layout(), "agents-list")) return cx.spawn(async (cx) => this.workJob(job, cx));
+    const queued = shared("worktree.jobs");
+    setShared("worktree.jobs", [...(Array.isArray(queued) ? queued : []), job]);
     setShared("worktree.job", job);
     this.close();
   }
@@ -401,6 +403,7 @@ export default class Worktree extends View {
     // (from that tree) is what starts a space, so creating one never adds a space.
     // The panel underneath re-reads its worktrees and selects this one.
     setShared("worktree.created", path);
+    setShared("worktree.createdAt", Date.now());
     return "";
   }
 
@@ -417,7 +420,9 @@ export default class Worktree extends View {
     // Name the space after the checkout: Herdr names an unnamed space after its
     // shell's live folder, so a `cd` would rename the worktree out from under it.
     const name = c.branch ?? c.path.split("/").pop();
-    if (!s) return run("space.new", { folder: c.path, machine: this.on, name });
+    // "" is this computer. null would be omitted, and the space would open on
+    // whichever machine the focused space belongs to.
+    if (!s) return run("space.new", { folder: c.path, name, machine: this.on ?? "" });
     // A space with no terminal left (no tabs, or only mod panes) opens a shell.
     const tabs = new Set((s.tabs ?? []).map((t2) => t2.id));
     run("space.select", { id: s.id });

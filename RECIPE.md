@@ -120,9 +120,11 @@ closes the space / stops the agent / removes the worktree, `Ctrl+P` pins,
 stepping, at the same 70 ms pace as the sheet, aimed past the row they just
 left so two quick presses do not aim at the same neighbour. `Esc` leaves, and
 `N`, `G`, `F` stay for a new space, opening a worktree and folding. Walking with
-`Ctrl+J`/`K` goes through the footer like the sheet's: the app's keymap takes
+`Ctrl+J`/`K` goes through the left sidebar handle, like the sheet's: the app's keymap takes
 those keys, so the sidebar says `shared("sidebar.kb")` while it holds the
-keyboard and the footer answers with `shared("sidebar.move")`, polled only then.
+keyboard and the handle answers with `shared("sidebar.move")`, polled only then.
+The handle stays shown when the sidebar is hidden and when the rail is folded,
+which is when the footer and the terminals list are not.
 The sheet lists all of these under "Sidebar · with its keyboard"; the
 sidebar itself draws no hint row. Adding or removing a space from the list keeps
 the keyboard there: the sidebar re-claims its focus handle as the app settles
@@ -189,6 +191,9 @@ and offers to make one.
 - `Ctrl+Shift+M` flips the whole sidebar to the other side (the layout's two root
   children swap, and with them the panel and the terminal pane); `Ctrl+Shift+D`
   opens the new-worktree dialog for the space you are in.
+- Those keys, and `Ctrl+Shift+X` / `Ctrl+Shift+W`, are `handle.*` commands on the
+  left edge tab. It stays in the layout when the sidebar is hidden and when the
+  rail hides the footer and the terminals list.
 
 **The search sheet** (720 × 560, opened by `Alt+F` or the sidebar's magnifier)
 
@@ -206,7 +211,7 @@ and offers to make one.
   move, `Enter` to go (space → select it, agent → focus it, worktree → open it,
   pin → open a space there, or go to the space already there).
 - **`Ctrl+J`/`Ctrl+K` are shared with pane movement, and separated by the panel.**
-  `keys.json` (under `layout:workspace`) binds them to `footer.dir_down`/`dir_up`,
+  `keys.json` (under `layout:workspace`) binds them to `handle.dir_down`/`dir_up`,
   which moves pane focus when no panel is open, hands them to the find sheet when
   it is (`shared("search.open")` → `shared("search.move")`), and to the sidebar
   when its keyboard is there (`shared("sidebar.kb")` → `shared("sidebar.move")`).
@@ -284,14 +289,14 @@ Mods, all `"place": "none"` (the layout decides where they draw):
 
 | Mod | Props | What it does |
 |---|---|---|
-| `agents-list` | `{sidebar:true}`; no props: the `Alt+F` sheet; `{menu}` / `{sortMenu}`: its popups | The sidebar and the find sheet, one mod. `core.js` is the logic both use (spaces, pins, removals, worktrees, order, row actions); `sidebar.js` and `palette.js` are the two drawings. `agents()`, `setAgentOrder`, `terminal.pin`, `agent.focus`, `keys()`; agent state in `localStorage` (`changed`) and the sort in shared `agents.sort`. |
+| `agents-list` | `{sidebar:true}`; no props: the `Alt+F` sheet; `{menu}` / `{sortMenu}`: its popups | The sidebar and the find sheet, one mod. `workspace-engine.js` is the logic both use (spaces, pins, removals, worktrees, order, row actions); `sidebar.js` and `palette.js` are the two drawings. `agents()`, `setAgentOrder`, `terminal.pin`, `agent.focus`, `keys()`; agent state in `localStorage` (`changed`) and the sort in shared `agents.sort`. |
 | `terminals-list` | — | The TERMINALS list. `panes()`, `spaces()`, `focused()`, `tab.select`, `pane.focus`, `tab.new`, `tab.close`, `pane.close`, `layout.show/hide/select`; panel choice per space in `localStorage` (`panels`). |
-| `footer` | — | The footer, the sidebar menu trigger, `Ctrl+J/K`, flip, new worktree, the deleted-space sweep. `spaces()`, `layout()`, `layout.toggle/resize/set`, `shared` `sidebar.width`, `sidebar.collapsed`, `spaces.pinned`, `search.open`, `search.move`. |
+| `footer` | — | The footer and the sidebar menu trigger, plus the deleted-space sweep. It still answers `dir_down`/`dir_up`, `flip_layout` and `worktree_new` when a key is rebound onto it. `spaces()`, `layout()`, `layout.toggle/resize/set`, `shared` `sidebar.width`, `sidebar.collapsed`, `spaces.pinned`, `search.open`, `search.move`. |
 | `icons` | — | Icons every other mod loads (`mods/icons/*.svg`), plus a top bar used by other layouts: space chip (`git worktree list --porcelain` for the repo's name), search, settings, sidebar toggle, window buttons where the OS draws none. |
 | `shortcuts` | overlay | The keys sheet. `keys()`, `commands()`. |
 | `worktrees` | `{space?, folder?, machine?, action}` or `{agent}` | Dialogs: new, open, remove worktree; remove a space; stop an agent. Runs `git worktree list/add/remove` with `exec`, `spaces()`, `space.new/close`, `terminal.kill`; finds `$HOME` with `sh -c 'printf %s "$HOME"'` (PowerShell on Windows). |
 | `sidebar-menu` | overlay | The sidebar's right-click menu. `layout()`, `layout.set` (flip), `layout.hide`, `keys()` for the hints. |
-| `handle` | — | The edge tab while the sidebar is hidden. `placement()`, `layout()`, `layout.show/resize`. |
+| `handle` | — | The edge tab while the sidebar is hidden, and the layout keys that have to work then: `Ctrl+J/K` (`handle.dir_down`/`dir_up`), flip (`handle.flip_layout`), new worktree (`handle.worktree_new`), close pane and close tab. Only the left copy listens. `placement()`, `nextCommand()`, `layout()`, `layout.show/resize/set`, `pane.go`, `pane.close`, `tab.close`, `tab.new`. |
 | `pane-header` | — | Optional pane header (program, folder, working/needs-you/done, split, zoom, close). Not used by this layout. |
 
 The keys are the repository's `keys.json`: `install.sh` updates its
@@ -318,21 +323,54 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   from mods. Renaming one silently drops a panel or the flip half.
 - **The sidebar and the sheet are one mod, and cannot be split again.** Herdr
   rejects an import outside a mod's own folder (and a symlink to one), so the
-  shared rules in `core.js` only work with both views in `mods/agents-list/`.
+  shared rules in `workspace-engine.js` only work with both views in `mods/agents-list/`.
   The sheet draws `mods/agents-list/{layers,pin,x}.svg` from its own folder.
   Its cross-mod needs are the `worktrees` dialogs behind `Ctrl+A` and `Ctrl+D`,
-  and `footer` for the `Ctrl+J`/`Ctrl+K` handshake — `↑`/`↓` work without
-  either. The layout's block must carry `"props": {"sidebar": true}`: without
+  and `handle` for the `Ctrl+J`/`Ctrl+K` handshake — `↑`/`↓` work without
+  either. The footer still answers those commands if a key is pointed at it. The layout's block must carry `"props": {"sidebar": true}`: without
   it the block is the sheet.
-- **The worktree tree is one function, `worktreeTree` in `core.js`.** Both views
+- **The root draws its view itself; it never hands back a `cx.new` child.**
+  Herdr re-renders a mod's root view on every live change (spaces, agents,
+  terminals, focus, shared state) and stops there. A retained child is rebuilt
+  only when *it* is notified, so mounting the sidebar and the sheet with
+  `cx.new` left the panel up to a minute behind — a sort chosen in the popup, an
+  agent's status, or a space selected from the keyboard arrived only when one of
+  the panel's own timers happened to fire (the highlight stayed on the old
+  space). `main.js` builds the view with `new`, calls its `init(props, cx)` with
+  the root's context, and returns `this.inner.render(cx)`; `close(cx)` forwards
+  to the view's own teardown.
+- **The shared picture is written only when it moved.** `persistWorkspace`
+  compares the picture without `at` (when it was written). Including it made
+  every scan look like a change, so an idle window rewrote shared state — and
+  therefore repainted every mod — once per eight-second scan.
+- **The worktree tree is one function, `worktreeTree` in `workspace-engine.js`.** Both views
   pass it their git answer and it returns which space holds each worktree and
   each unopened checkout. Do not build parent maps in a view: the sheet's copy
   silently fell over (helpers it no longer imported) and listed every worktree
-  as a bare row. A worktree is read from the live place **and** `s.folder`, so a
-  shell that `cd`s out of its checkout stays nested. A row is labelled with the
-  checkout's branch, never `s.name`: Herdr renames an unnamed space after its
-  live folder (`test` became `tmp` after one `cd`). For the same reason a
-  checkout that is opened becomes a space **named** after its branch.
+  as a bare row. The answer comes from the sticky `workspace.spacePins` record
+  (below), so a shell that `cd`s out of its checkout stays nested. A row is
+  labelled with the checkout's branch, never `s.name`: Herdr renames an unnamed
+  space after its live folder (`test` became `tmp` after one `cd`). For the same
+  reason a checkout that is opened becomes a space **named** after its branch.
+- **A worktree is pinned by `--git-common-dir`, not by path.** `repo.groupKey` is
+  `<machine>\0<repo>`, where `<repo>` is the main checkout for both a main
+  checkout and a linked worktree (`rev-parse --path-format=absolute
+  --git-common-dir`, minus `/.git`). `spacePins` keeps `{groupKey, main,
+  worktreePath, root, branch, isWorktree}` per space in `shared.json`
+  (`workspace.state`). A `cd` into the main checkout, a subfolder, or a folder
+  with no repo keeps the record; a `cd` into a *different* repository root
+  re-pins it. Never decide "worktree" from a folder prefix or a `.git` check:
+  checkouts can live anywhere (`worktrees.directory`).
+- **The sheet opens with no git.** `hydrateWorkspace()` fills the in-memory
+  picture from `workspace.state` before the first frame. `askGit` is only called
+  for an explicit creation or removal, and the sidebar's scanner is the only
+  place that runs `git rev-parse` / `git worktree list`. Never call `exec` from a
+  render, a status tick, or the sheet's open path.
+- **Worktrees reorder in their own list.** `space.move` indexes spaces inside
+  one machine's block; it cannot order checkouts. Nested worktrees (opened or
+  not) step through `workspace.order[groupKey]`, a persisted path array written
+  by `movePathWithin`. `machineIndexOf` is the only conversion from a drawn row
+  to a `space.move` index, and a cross-machine drop is refused.
 - **Half the icons are Herdr's, not this bundle's.** The mods point at
   `mods/workspace-chrome/*.svg` (search, branch, plus, spinner, chevron, check,
   server, monitor, sidebar), `mods/files/file.svg` and

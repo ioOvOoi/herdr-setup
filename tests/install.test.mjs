@@ -55,7 +55,7 @@ try {
   check("the tab and space numbers are installed",
     layout["alt-1"] === "tab.select:1" && layout["ctrl-1"] === "space.select:1");
   check("the sidebar walk is installed",
-    layout["ctrl-j"] === "footer.dir_down" && layout["ctrl-k"] === "footer.dir_up");
+    layout["ctrl-j"] === "handle.dir_down" && layout["ctrl-k"] === "handle.dir_up");
 
   check("the person's own global key is kept",
     keys.global["my-key"] === "space.new" && keys.global["ctrl-shift-t"] === "tab.new");

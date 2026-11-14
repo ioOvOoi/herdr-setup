@@ -11,7 +11,7 @@
 //     worktree" cannot read as if it is about to close something unrelated;
 //   - a recovery from the sidebar's dialogs puts the keyboard back in the list.
 //
-// The rules live once, in mods/agents-list/core.js, because the sidebar and the
+// The rules live once, in mods/agents-list/workspace-engine.js, because the sidebar and the
 // find sheet are one mod: both views must refuse the same things.
 //
 //   node tests/pinned.test.mjs
@@ -72,7 +72,7 @@ const pins = [
   { folder: "/home/y/legacy", machine: null, name: "legacy" },
 ];
 
-for (const [mod, file] of [["footer", "main.js"], ["worktrees", "main.js"], ["icons", "main.js"], ["agents-list", "core.js"]]) {
+for (const [mod, file] of [["footer", "main.js"], ["worktrees", "main.js"], ["icons", "main.js"], ["agents-list", "workspace-engine.js"]]) {
   const factory = liftPinned(read(mod, file));
   const place = (s) => s?.folder ?? null;
   const isPinned = factory((key) => (key === "spaces.pinned" ? pins : undefined), place);
@@ -121,31 +121,34 @@ check("stopping an agent says what happens to its space",
   /only terminal in \$\{home\.name\}: a shell opens in its place/.test(worktree));
 
 // One rule, two views: the sheet and the sidebar call the same `closeRow`,
-// `pinRow` and `worktreeRow` from core.js, so neither can drift.
-const core = read("agents-list", "core.js");
+// `pinRow` and `worktreeRow` from workspace-engine.js, so neither can drift.
+const core = read("agents-list", "workspace-engine.js");
 const palette = read("agents-list", "palette.js");
 const sidebar = read("agents-list", "sidebar.js");
 check("the shared close refuses to close a pinned space",
   /if \(!tree && isPinned\(s\)\) return notify\(\{/.test(core));
 check("the shared close still offers removing a worktree, pinned or not",
-  /if \(!tree && isPinned\(s\)\)[\s\S]{0,700}action: tree \? "remove" : "space"/.test(core));
+  /if \(!tree && isPinned\(s\)\)[\s\S]{0,1600}action: tree \? "remove" : "space"/.test(core));
 check("the sheet closes its row through the shared action",
   /if \(this\.chord\(e, cx\)\)/.test(palette) && /if \(k === "d"\) \{ this\.closeRow\(this\.selectedRow\(\)\); return true; \}/.test(core));
 check("the sidebar closes its row through the shared action",
   /closeEntry\(\) \{\s*\n\s*this\.closeRow\(this\.selectedRow\(\)\);/.test(sidebar));
 
 check("the sidebar runs the removal, so it outlives the dialog",
-  /watchJob\(cx\) \{[\s\S]{0,300}setShared\("worktree\.job", null\);[\s\S]{0,160}this\.runWorktreeJob\(job, cx\)/.test(sidebar));
+  /watchJob\(cx\) \{[\s\S]{0,900}setShared\("worktree\.job", null\);[\s\S]{0,700}this\.runWorktreeJob\(/.test(sidebar));
+check("a second removal is queued instead of overwriting the first",
+  /setShared\("worktree\.jobs", \[\.\.\.\(Array\.isArray\(queued\) \? queued : \[\]\), job\]\)/.test(worktree)
+  && /shared\("worktree\.jobs"\)/.test(sidebar));
 check("a failed removal leaves the spaces alone",
   /"worktree", "remove"[\s\S]{0,500}if \(!error\) \{[\s\S]{0,90}if \(!windows\) closeSpaces\(\)/.test(sidebar));
 check("a checkout on its way out leaves the list before git finishes",
-  /spaces\(\)\.filter\(\(s\) => !isRemoving\(place\(s, paneList\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)\)/.test(sidebar)
+  /frameCache\("spaces", spaces\)\.filter\(\(s\) => !isRemoving\(place\(s, paneList\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)\)/.test(sidebar)
   && /forest\.checkoutParents\.get[\s\S]{0,120}isRemoving\(c\.path, c\.on\)/.test(sidebar)
-  && /liveSpaces\(\) \{[\s\S]{0,220}!isRemoving\(place\(s\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)/.test(palette));
+  && /liveSpaces\(ps = panes\(\)\) \{[\s\S]{0,900}!isRemoving\(place\(s, ps\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)/.test(palette));
 check("the space menu does not offer closing a pinned space",
   /\.\.\.\(pin \|\| isWorktreeSpace \? \[\] : \[\{ id: "sm-close"/.test(sidebar));
 check("the shared close asks to remove a worktree space, not to close it",
-  /const tree = this\.isWorktree\(s\);[\s\S]{0,900}action: tree \? "remove" : "space"/.test(core));
+  /const tree = this\.isWorktree\(s\);[\s\S]{0,1600}action: tree \? "remove" : "space"/.test(core));
 check("closing an unopened checkout asks to remove that checkout",
   /r\.kind === "checkout"[\s\S]{0,300}action: "remove"/.test(core));
 check("an unopened checkout row shows no \"open\" word",
@@ -156,12 +159,12 @@ check("an agent can be stopped from the sidebar's menu, whatever its space's pin
   /const stop = then\(\(\) => \{[\s\S]{0,300}sidebarDialog\(\{ mod: "worktrees", kind: "dialog", width: 440, height: 156, props: \{ agent: a\.address \} \}\)/.test(sidebar));
 
 // The removal the sidebar runs, cut out and run: git first, then the checkout's
-// spaces close. A failure closes none and says why; either way the cached
-// checkout list is settled by what git actually said.
+// spaces close. A failure closes none, says why, and leaves the cached checkout
+// where it was so the row comes back at once. A success drops it from the cache.
 {
   const at = sidebar.indexOf("  async runWorktreeJob(");
   const end = sidebar.indexOf("\n  }", at) + 4;
-  const runJob = new Function("exec", "run", "setShared", "notify", "window", "removingList", "tidyPath",
+  const runJob = new Function("exec", "run", "setShared", "notify", "window", "removingList", "tidyPath", "persistWorkspace",
     `${sidebar.slice(at, end).replace("  async runWorktreeJob(", "async function runWorktreeJob(")}
      return runWorktreeJob;`);
   const go = async (code) => {
@@ -180,6 +183,7 @@ check("an agent can be stopped from the sidebar's menu, whatever its space's pin
       () => ({ platform: "linux" }),
       () => [],
       (p) => p,
+      () => false,
     ).call(self, { at: 1, top: "/w", main: "/repo", on: null, force: false, spaces: ["s1"], pins: [{ id: "a" }] }, { notify() {} });
     return { calls, self };
   };
@@ -194,6 +198,9 @@ check("an agent can be stopped from the sidebar's menu, whatever its space's pin
   check("a failed removal closes no space and says why",
     bad.calls.closed.length === 0 && bad.calls.notes.length === 1 && /still dirty/.test(bad.calls.notes[0].body),
     JSON.stringify(bad.calls));
+  check("a failed removal leaves the cached checkout in the list",
+    bad.self.trees.repo.length === 2 && bad.self.trees.repo.some((c) => c.path === "/w"),
+    JSON.stringify(bad.self.trees.repo));
 }
 
 // What "on its way out" means, lifted out of core and run: the checkout the

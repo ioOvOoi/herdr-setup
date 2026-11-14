@@ -46,6 +46,13 @@ const heading = (section) =>
 // Commands of this setup's own panels: their names are ours, so they get names a
 // person reads, not `panel.command`.
 const OURS = {
+  "handle.dir_down": "Move down: a pane, or the search list",
+  "handle.dir_up": "Move up: a pane, or the search list",
+  "handle.flip_layout": "Flip the sidebar to the other side",
+  "handle.worktree_new": "New worktree",
+  "handle.close_pane": "Close this pane",
+  "handle.close_tab": "Close this tab",
+  // Still named, so a key rebound to the footer or the terminals list keeps a label.
   "footer.dir_down": "Move down: a pane, or the search list",
   "footer.dir_up": "Move up: a pane, or the search list",
   "footer.flip_layout": "Flip the sidebar to the other side",
@@ -151,6 +158,12 @@ export default class Keys extends View {
     // two rows for one command; the more specific section is the one in effect.
     const rank = (section) => section === "global" ? 0 : section.startsWith("layout:") ? 1 : section === "terminal" ? 2 : 3;
     const bindings = keys();
+    // A layout section wins its keys. The global row for the same press
+    // (tab.close on Ctrl+Shift+W, pane.close on Ctrl+Shift+X) is the binding
+    // this layout replaced. Terminal bindings stay: Ctrl+Q types in a terminal
+    // and closes a dialog everywhere else.
+    const layoutKeys = new Set();
+    for (const b of bindings) if (String(b.section ?? "").startsWith("layout:")) layoutKeys.add(b.keys);
     const best = new Map();
     for (const b of bindings) {
       if (b.action.startsWith("send:")) continue;
@@ -161,6 +174,7 @@ export default class Keys extends View {
       // Keys that just type bytes into the terminal ("send:...") are one line of
       // noise each and say nothing a person looks up here.
       if (b.action.startsWith("send:")) continue;
+      if (b.section === "global" && layoutKeys.has(b.keys)) continue;
       if (best.get(`${b.action}\u0000${b.keys}`) > rank(b.section)) continue;
       const command = b.action.split(":")[0];
       const said_ = OURS[b.action] ?? about.get(command) ?? said(b.action);

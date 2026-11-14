@@ -123,10 +123,10 @@ const check = (label, ok, extra = "") => {
 // A pin reads as pinned whether it has an id or not, and pinning never repeats
 // or swallows another space's pin.
 {
-  const pinKey = new Function("norm", `${top("mods/agents-list/core.js", "pinKey")}; return pinKey;`)(norm);
-  const samePin = new Function("pinKey", `${top("mods/agents-list/core.js", "samePin")}; return samePin;`)(pinKey);
-  const pinnedList = top("mods/agents-list/core.js", "pinnedList");
-  const cls = ["spacePin", "setPin", "bindPins"].map((m) => method("mods/agents-list/core.js", m)
+  const pinKey = new Function("norm", `${top("mods/agents-list/workspace-engine.js", "pinKey")}; return pinKey;`)(norm);
+  const samePin = new Function("pinKey", `${top("mods/agents-list/workspace-engine.js", "samePin")}; return samePin;`)(pinKey);
+  const pinnedList = top("mods/agents-list/workspace-engine.js", "pinnedList");
+  const cls = ["spacePin", "setPin", "bindPins"].map((m) => method("mods/agents-list/workspace-engine.js", m)
     .replace(`function ${m}`, m)).join("\n");
   const palette = new Function("shared", "setShared", "spaces", "norm", "pinnedList", "pinKey", "samePin",
     "place", "writePins", "spaceAt", `${pinnedList}
@@ -138,7 +138,7 @@ const check = (label, ok, extra = "") => {
   let live = [];
   // The real "is a space standing here", with place() reading the space's folder.
   const spaceAt = new Function("norm", "place", "spaces", "panes",
-    `${top("mods/agents-list/core.js", "spaceAt")}; return spaceAt;`)(norm, (s) => s.folder, () => live, () => []);
+    `${top("mods/agents-list/workspace-engine.js", "spaceAt")}; return spaceAt;`)(norm, (s) => s.folder, () => live, () => []);
   // The factory returns the class; the test needs one copy of it.
   const make = () => new (palette(() => copy(pins), (_k, v) => { pins = v; }, () => live, norm,
     () => copy(pins), pinKey, samePin, (s) => s.folder, (next) => { pins = next; }, spaceAt))();
@@ -202,7 +202,7 @@ const check = (label, ok, extra = "") => {
   // The row must promise what the click gives: an unnamed pin opens a space that
   // Herdr names after the folder, so that is what the row says.
   const pinLabel = new Function("base",
-    `${top("mods/agents-list/core.js", "pinLabel")}; return pinLabel;`)((q) => (q ?? "").split("/").filter(Boolean).pop() ?? "");
+    `${top("mods/agents-list/workspace-engine.js", "pinLabel")}; return pinLabel;`)((q) => (q ?? "").split("/").filter(Boolean).pop() ?? "");
   check("palette: an unnamed pin reads the name its folder gets",
     pinLabel({ name: "reel", named: false, folder: F }) === "shared",
     pinLabel({ name: "reel", named: false, folder: F }));

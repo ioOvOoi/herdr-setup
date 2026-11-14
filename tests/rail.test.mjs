@@ -39,7 +39,7 @@ for (const n of [10, 12]) {
 const all = railShown(cells(12), null);
 check("no limit leaves the agent rail whole", all.shown.length === 12 && all.beyond === 0);
 check("the rail lists places, not worktree checkouts",
-  /spaces\(\)\.filter\(\(sp\) => !this\.isWorktree\(sp\)/.test(src));
+  /frameCache\("spaces", spaces\)\.filter\(\(sp\) => !this\.isWorktree\(sp\)/.test(src));
 
 if (failures) {
   console.error(`\n${failures} rail check(s) failed`);

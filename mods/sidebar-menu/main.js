@@ -56,7 +56,7 @@ export default class LayoutMenu extends View {
   render() {
     const t = theme();
     const left = layout()?.children?.[0]?.id === "sidebar";
-    const moveKey = binding("footer.flip_layout");
+    const moveKey = binding("handle.flip_layout") || binding("footer.flip_layout");
     const hideKey = binding("layout.toggle:sidebar");
     const move = () => { flipLayout(); closeOverlay(props()?.overlay); };
     const hide = () => { run("layout.hide", { id: "sidebar" }); closeOverlay(props()?.overlay); };
