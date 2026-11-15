@@ -126,22 +126,25 @@ const check = (label, ok, extra = "") => {
   const pinKey = new Function("norm", `${top("mods/agents-list/workspace-engine.js", "pinKey")}; return pinKey;`)(norm);
   const samePin = new Function("pinKey", `${top("mods/agents-list/workspace-engine.js", "samePin")}; return samePin;`)(pinKey);
   const pinnedList = top("mods/agents-list/workspace-engine.js", "pinnedList");
-  const cls = ["spacePin", "setPin", "bindPins"].map((m) => method("mods/agents-list/workspace-engine.js", m)
+  const cls = ["spacePin", "setPin", "bindPins", "movePinRow"].map((m) => method("mods/agents-list/workspace-engine.js", m)
     .replace(`function ${m}`, m)).join("\n");
   const palette = new Function("shared", "setShared", "spaces", "norm", "pinnedList", "pinKey", "samePin",
-    "place", "writePins", "spaceAt", `${pinnedList}
+    "place", "writePins", "spaceAt", "spaceRecord", "groupKeyOf", "spaceColors", `${pinnedList}
     return class P {
       ${cls}
     };`);
 
   let pins = [];
   let live = [];
+  let pinRecord = null;
+  let pinColors = {};
   // The real "is a space standing here", with place() reading the space's folder.
   const spaceAt = new Function("norm", "place", "spaces", "panes",
     `${top("mods/agents-list/workspace-engine.js", "spaceAt")}; return spaceAt;`)(norm, (s) => s.folder, () => live, () => []);
   // The factory returns the class; the test needs one copy of it.
   const make = () => new (palette(() => copy(pins), (_k, v) => { pins = v; }, () => live, norm,
-    () => copy(pins), pinKey, samePin, (s) => s.folder, (next) => { pins = next; }, spaceAt))();
+    () => copy(pins), pinKey, samePin, (s) => s.folder, (next) => { pins = next; }, spaceAt,
+    () => pinRecord, () => null, () => copy(pinColors)))();
 
   const F = "/work/shared";
   pins = [{ folder: F, machine: null }];
@@ -182,15 +185,57 @@ const check = (label, ok, extra = "") => {
   check("palette: a pin with an id but no folder is kept, not filtered out",
     p.spacePin({ id: "sp9" })?.id === "sp9", JSON.stringify(pins));
 
-  // A pin whose space is gone while another space stands in its folder has
-  // nothing to open: kept, it is a second row for one place and a click that
-  // makes a duplicate space. Opening the panel drops it.
+  // The repo and the colour belong to the place: they are what its checkouts
+  // hang under and what its avatar wears while the space is gone.
+  pins = [];
+  live = [{ id: "sp1", folder: F, machine: null, name: "one", named: true }];
+  pinRecord = { groupKey: "m\u001f/w/shared" };
+  pinColors = { sp1: "ansi3" };
+  p = make();
+  p.setPin(live[0]);
+  check("palette: a pin keeps the repo and the colour of its place",
+    pins[0]?.repo === "m\u001f/w/shared" && pins[0]?.color === "ansi3", JSON.stringify(pins));
+  pinRecord = null;
+  pinColors = {};
+
+  // A pin is the place it names. The space its own row opens stands where the
+  // pin's space did, so the pin takes it: the row keeps its slot and the place
+  // stays pinned, instead of the new space coming up unpinned at the bottom.
+  pins = [{ id: "a", folder: "/w/a" }, { id: "dead", folder: F }, { id: "c", folder: "/w/c" }];
+  live = [{ id: "a", folder: "/w/a" }, { id: "sp1", folder: F }, { id: "c", folder: "/w/c" }];
+  p = make();
+  p.bindPins();
+  check("palette: a pin takes the space standing in its place, in its slot",
+    pins.length === 3 && pins[1].id === "sp1" && pins[0].id === "a" && pins[2].id === "c",
+    JSON.stringify(pins));
+
+  // The Pinned section reads the pin list, so a move between two pins moves the
+  // pin; `space.move` alone would leave the row drawn where it was.
+  pins = [{ id: "a", folder: "/w/a" }, { id: "b", folder: "/w/b" }, { id: "c", folder: "/w/c" }];
+  live = [{ id: "a", folder: "/w/a" }, { id: "b", folder: "/w/b" }, { id: "c", folder: "/w/c" }];
+  p = make();
+  check("palette: a pinned row moves its pin too",
+    p.movePinRow(live[2], live[0], -1) === true && pins.map((x) => x.id).join(",") === "c,a,b",
+    JSON.stringify(pins));
+  check("palette: an unpinned row moves no pin",
+    p.movePinRow({ id: "nope" }, live[1], 1) === false && pins.map((x) => x.id).join(",") === "c,a,b",
+    JSON.stringify(pins));
+
+  // Two spaces in one folder are two places; a pin cannot say which one it means.
   pins = [{ id: "dead", folder: F }];
+  live = [{ id: "sp1", folder: F }, { id: "sp2", folder: F }];
+  p = make();
+  p.bindPins();
+  check("palette: two spaces in its folder leave the pin a place row",
+    pins.length === 1 && pins[0].id === "dead", JSON.stringify(pins));
+
+  // A space another pin already holds is not handed to this one.
+  pins = [{ id: "old", folder: F }, { id: "sp1", folder: F }];
   live = [{ id: "sp1", folder: F }];
   p = make();
   p.bindPins();
-  check("palette: a pin whose place already is a space is dropped",
-    pins.length === 0, JSON.stringify(pins));
+  check("palette: a pin does not take a space another pin holds",
+    pins.length === 2 && pins[0].id === "old", JSON.stringify(pins));
 
   pins = [{ id: "dead", folder: "/work/elsewhere" }];
   live = [{ id: "sp1", folder: F }];
@@ -209,6 +254,51 @@ const check = (label, ok, extra = "") => {
   check("palette: a pin somebody named keeps that name",
     pinLabel({ name: "reel", named: true, folder: F }) === "reel",
     pinLabel({ name: "reel", named: true, folder: F }));
+}
+
+// ------------------------------------------------------------------- pin rows
+// One slot per pin. The Pinned section draws these in order, so a place whose
+// space is gone keeps the line it had, and the space that takes the place back
+// is drawn in that same line.
+{
+  let pins = [
+    { id: "a", folder: "/w/a" },
+    { id: "dead", folder: "/w/b" },
+    { id: "c", folder: "/w/c" },
+  ];
+  let live = [{ id: "a", folder: "/w/a" }, { id: "c", folder: "/w/c" }];
+  const pinRows = new Function("pinnedList", "spaces", "norm", "place",
+    `${top("mods/agents-list/workspace-engine.js", "pinRows")}; return pinRows;`)(
+    () => copy(pins), () => live, norm, (s) => s.folder);
+  let rows = pinRows();
+  check("pin rows: a place with no space keeps its line",
+    rows.length === 3 && rows[0].s?.id === "a" && rows[1].p.id === "dead"
+      && rows[1].s === null && rows[2].s?.id === "c", JSON.stringify(rows));
+  live = [{ id: "a", folder: "/w/a" }, { id: "b2", folder: "/w/b" }, { id: "c", folder: "/w/c" }];
+  pins = [{ id: "a", folder: "/w/a" }, { id: "b2", folder: "/w/b" }, { id: "c", folder: "/w/c" }];
+  rows = pinRows();
+  check("pin rows: the space that takes the place back takes its line",
+    rows.length === 3 && rows[1].s?.id === "b2" && rows[1].p.id === "b2", JSON.stringify(rows));
+  // Pins saved before pins had ids name their place by folder.
+  pins = [{ folder: "/w/a", machine: null }, { id: "b2", folder: "/w/b" }];
+  live = [{ id: "a", folder: "/w/a" }, { id: "b2", folder: "/w/b" }];
+  rows = pinRows();
+  check("pin rows: an old pin without an id reads the space in its folder",
+    rows[0].s?.id === "a", JSON.stringify(rows));
+}
+
+// A pin names a repo, not just a space: the group key is what its checkouts hang
+// under while the space is gone.
+{
+  const pinnedRepo = new Function("SEP", "tidyPath",
+    `${top("mods/agents-list/workspace-engine.js", "pinnedRepo")}; return pinnedRepo;`)("\u001f", norm);
+  const p = { id: "sp1", folder: "/w/repo/", machine: null };
+  check("pins: a pin pinned with a repo keeps it",
+    pinnedRepo({ ...p, repo: "m\u001f/w/repo" }, {}) === "m\u001f/w/repo");
+  check("pins: a pin without a repo reads the scan of its folder",
+    pinnedRepo(p, { "\u001f/w/repo": { repo: "\u001f/w/repo" } }) === "\u001f/w/repo");
+  check("pins: with no scan answer its folder is the main checkout",
+    pinnedRepo(p, {}) === "\u001f/w/repo");
 }
 
 console.log(failures ? `\n${failures} failed` : "\nall pin checks passed");

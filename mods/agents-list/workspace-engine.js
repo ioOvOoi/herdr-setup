@@ -153,6 +153,19 @@ export function spaceColors() {
     kept[p.id] = PROJECT_COLORS.reduce((best, c) => (uses(c) < uses(best) ? c : best));
     changed = true;
   }
+  // A pin's colour belongs to the place, not to the space id it was pinned with:
+  // a place whose space is gone keeps its avatar, and the space that takes the
+  // place back wears it too.
+  const pins = pinnedList();
+  let pinsChanged = false;
+  for (const p of pins) {
+    if (!p.id || !ids.has(p.id)) continue;
+    const color = kept[p.id] ?? p.color;
+    if (!color) continue;
+    if (p.color !== color) { p.color = color; pinsChanged = true; }
+    if (kept[p.id] !== color) { kept[p.id] = color; changed = true; }
+  }
+  if (pinsChanged) writePins(pins, "gave a pin the colour of its place");
   if (changed) setShared("space.colors", kept);
   if (paintDepth > 0) paintBox.set("space.colors.result", kept);
   return kept;
@@ -731,6 +744,30 @@ export function pinnedList() {
   return Array.isArray(list) ? list.filter((p) => p && (p.id || p.folder)) : [];
 }
 
+// The repo a pin names, as a group key (`<machine>\0<main checkout>`): the
+// record taken when it was pinned, else the scan's answer for its folder, else
+// the folder itself is the main checkout. A pin is a place, and its repo is
+// what its checkouts hang under while the space is gone.
+export function pinnedRepo(p, git = workspace.git) {
+  if (!p) return null;
+  if (p.repo) return p.repo;
+  if (!p.folder) return null;
+  const key = `${p.machine ?? ""}${SEP}${tidyPath(p.folder)}`;
+  return git?.[key]?.repo ?? key;
+}
+
+// Every pin in its own slot: one row per pin, in the order the pins were made,
+// which is the order the Pinned section draws. A place whose space is gone keeps
+// its line, and the space the place opens takes that line back. `s` is the live
+// space, or null for a place with nothing in it right now.
+export function pinRows(all = spaces()) {
+  const live = new Map(all.map((s) => [s.id, s]));
+  // Pins saved before pins had ids name their place by folder, never a space.
+  const at = (p) => all.find((s) => (s.machine ?? null) === (p.machine ?? null)
+    && (norm(place(s) ?? "") === norm(p.folder) || norm(s.folder ?? "") === norm(p.folder)));
+  return pinnedList().map((p) => ({ p, s: (p.id ? (live.get(p.id) ?? null) : (at(p) ?? null)) }));
+}
+
 // A pinned space is never closed. The same rule, spelled the same way, in the
 // sidebar, the dialogs and here: a pin names its space by id, or — pins saved
 // before ids — by the place it was pinned at.
@@ -934,42 +971,52 @@ export class Workspace extends View {
 
   noteTree() { touchWorkspace(); }
 
-  // The pin of exactly this space, by its id. Two spaces can share a folder and
-  // both be pinned, so the folder decides nothing here: a pin whose space is
-  // gone stays a pin row (a place to open), and a space made later is never
-  // handed that pin behind your back.
+  // The pin of exactly this space, by its id: the menu, the refusal to close and
+  // the pin toggle all ask about the space in hand. Two spaces can share a folder
+  // and both be pinned, so the folder decides nothing here; `bindPins` is what
+  // gives a place row's pin to the space a click opens there, by writing its id.
   spacePin(s) {
     if (!s) return null;
     return pinnedList().find((p) => p.id === s.id) ?? null;
   }
 
-  // A pin saved before pins had ids is given one, once, when a view opens: it
-  // was pinned as this folder, so the space living there is what it means. This
-  // never runs for a pin that has an id — not even a stale one — because a new
-  // space must not come up pinned.
-  bindPins() {
+  // A pin names a place, and its space id is how it finds that place while the
+  // space lives. When the space is gone and exactly one space stands in the
+  // pin's folder again — the one its own row opened, or one made there by hand —
+  // the pin takes that space, so the place stays pinned and the row keeps its
+  // slot. Two spaces in one folder are two places and a pin cannot say which:
+  // it waits as a place row, exactly as it did before. Pins saved before pins had
+  // ids are given one the same way, once.
+  bindPins(all = spaces()) {
     const list = pinnedList();
-    const live = spaces();
-    const held = new Set(list.filter((p) => p.id && live.some((s) => s.id === p.id)).map((p) => p.id));
+    const byId = new Map(all.map((s) => [s.id, s]));
+    const held = new Set(list.filter((p) => p.id && byId.has(p.id)).map((p) => p.id));
+    // The one space this pin's place holds that no other pin has claimed.
+    const claim = (p) => {
+      if (!p.folder) return null;
+      const at = all.filter((s) => !held.has(s.id)
+        && (s.machine ?? null) === (p.machine ?? null)
+        && (norm(place(s) ?? "") === norm(p.folder) || norm(s.folder ?? "") === norm(p.folder)));
+      return at.length === 1 ? at[0] : null;
+    };
     let changed = false;
     for (const p of list) {
-      if (p.id) continue;
-      const s = live.find((x) => !held.has(x.id)
-        && (x.machine ?? null) === (p.machine ?? null)
-        && norm(x.folder ?? "") === norm(p.folder));
+      const here = p.id ? byId.get(p.id) : null;
+      // A pin taken before pins kept their repo learns it while the space is
+      // still here, so its checkouts can stay listed when the space goes.
+      if (here && !p.repo) {
+        const gk = spaceRecord(here)?.groupKey;
+        if (gk) { p.repo = gk; changed = true; }
+      }
+      if (here) continue;
+      const s = claim(p);
       if (!s) continue;
       held.add(s.id);
       p.id = s.id;
       p.name = p.name || s.name;
       changed = true;
     }
-    if (changed) writePins(list, "gave a pin without an id its space id");
-    // A pin whose space is gone while another space stands in its folder has
-    // nothing left to open: that folder is a space already. Kept, it is a second
-    // row for one place, and pressing it would make a duplicate space — the
-    // exact way a sheet ends up with three rows all reading "herdr-app".
-    const kept = list.filter((p) => (p.id && live.some((s) => s.id === p.id)) || !spaceAt(p.folder, p.machine ?? null, live));
-    if (kept.length !== list.length) writePins(kept, "dropped a pin whose place already is a space");
+    if (changed) writePins(list, "gave a pin the place it names");
   }
 
   // One pin, by id: pinning a space never touches another space in its folder,
@@ -986,7 +1033,14 @@ export class Workspace extends View {
     const mine = this.spacePin(s);
     writePins(mine
       ? list.filter((p) => !samePin(p, mine))
-      : [...list, { id: s.id, folder, machine: s.machine ?? null, name: s.name, named: Boolean(s.named) }],
+      : [...list, {
+        id: s.id, folder, machine: s.machine ?? null, name: s.name, named: Boolean(s.named),
+        // The repo and the colour belong to the place, not the space id: they are
+        // what its checkouts hang under, and what its avatar wears, while the
+        // space is gone.
+        repo: spaceRecord(s)?.groupKey ?? groupKeyOf(s) ?? null,
+        color: spaceColors()[s.id] ?? null,
+      }],
       mine ? `unpinned ${s.name}` : `pinned ${s.name}`);
   }
 
@@ -1411,6 +1465,10 @@ export class Workspace extends View {
     const cut = ti + (dir > 0 ? 1 : 0);
     this.reorderAim = [...rest.slice(0, cut), s.id, ...rest.slice(cut)];
     this.landBefore(s, target);
+    // The Pinned section reads the pin list, so a move inside it has to move the
+    // pin too: `space.move` alone would reorder Herdr's spaces and leave the row
+    // drawn where it was.
+    this.movePinRow(s, target, dir);
     // The drop row maps back to the *machine-scoped* position, never the raw
     // index in spaces(): the sidebar draws sections, filter, and nested rows.
     run("space.move", { id: s.id, index: at });
@@ -1421,6 +1479,24 @@ export class Workspace extends View {
   // The sheet toggles a pin when a step crosses the pinned line; the sidebar's
   // sections already keep pins apart, so it does nothing. One hook, overridden.
   landBefore() {}
+
+  // A pin keeps the slot it was given, and both views draw the Pinned section
+  // from the pin list, so a move between two pins moves the pin. Moving by value
+  // (`samePin`), never by index: `landBefore` may just have written a pin.
+  movePinRow(s, target, dir) {
+    const mine = this.spacePin(s);
+    const theirs = this.spacePin(target);
+    if (!mine || !theirs) return false;
+    const list = pinnedList();
+    const at = list.findIndex((p) => samePin(p, mine));
+    if (at < 0) return false;
+    const [held] = list.splice(at, 1);
+    const to = list.findIndex((p) => samePin(p, theirs));
+    if (to < 0) { list.splice(at, 0, held); return false; }
+    list.splice(to + (dir > 0 ? 1 : 0), 0, held);
+    writePins(list, `moved ${s.name ?? s.id}`);
+    return true;
+  }
 
   reorderStep(s, dir) {
     if (!s || !dir || !this.reorderIds) return;

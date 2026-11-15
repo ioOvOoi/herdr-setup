@@ -22,10 +22,12 @@ the window, and a narrow sidebar folds into a rail of icons.
 - **Panes as cards** — 10 px radius, 8 px between them, an accent border on the
   focused pane, and no header eating space.
 - **Worktrees from the sidebar.** New, open and remove in dialogs. A pinned
-  space never closes (its worktrees still can), and stopping an agent leaves a
-  shell in its place. The sidebar keeps the keyboard through its dialogs, and a
-  removal is optimistic: the checkout leaves the list on the press while git
-  works behind it, and only a failure brings it back, with the reason.
+  place keeps its line: no dialog closes it, its shell exiting leaves the row
+  where it was with its checkouts under it, and opening it again comes back
+  pinned in the same slot. Stopping an agent leaves a shell in its place. The
+  sidebar keeps the keyboard through its dialogs, and a removal is optimistic:
+  the checkout leaves the list on the press while git works behind it, and only
+  a failure brings it back, with the reason.
 - **A rail when narrow.** Below 160 px the sidebar becomes a column of state
   dots and icons; past nine spaces an ellipsis expands it again.
 - **A searchable keys sheet** — every shortcut in one list, one row per command.

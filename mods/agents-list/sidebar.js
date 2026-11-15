@@ -6,7 +6,7 @@ import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, machines, run, exec, hc, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, watchFolder, notify, nextCommand } from "herdr";
 import {
   Workspace, wash, place, norm, tidyPath, base, inWorktrees, isRemoving, removingList,
-  pinnedList, checkouts, dropGitCache, worktreeTree, spaceColor, RANK, MARK,
+  pinRows, pinnedList, pinnedRepo, checkouts, dropGitCache, worktreeTree, spaceColor, RANK, MARK,
   pinLabel, folderColor,
   onGitRefresh, takeGitAsk, touchWorkspace, listedCheckouts, pictureKey,
   beginPaint, endPaint, frameCache, spaceRecord, pinSpace, persistWorkspace,
@@ -567,6 +567,16 @@ export class Sidebar extends Workspace {
         jobs.push({ machine: s.machine ?? null, folder, key });
       }
     }
+    // A pinned place is still a place: its repo stays read while its space is
+    // closed, so its checkouts stay listed — and a space opened there binds at
+    // once, from the answer this scan already has.
+    for (const p of pinnedList()) {
+      if (!p.folder) continue;
+      const key = `${p.machine ?? ""}${SEP}${tidyPath(p.folder)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      jobs.push({ machine: p.machine ?? null, folder: p.folder, key });
+    }
     let changed = false;
     let cursor = 0;
     const worker = async () => {
@@ -586,8 +596,13 @@ export class Sidebar extends Workspace {
       changed = true;
     }
     // A repo nobody stands in any more keeps no checkout list. This also drops
-    // a list written by an older build under a key this one cannot address.
+    // a list written by an older build under a key this one cannot address. A
+    // pin is a place: its repo keeps its list even with no space in it.
     const repos = new Set(Object.values(this.git).map((g) => g?.repo).filter(Boolean));
+    for (const p of pinnedList()) {
+      const repo = pinnedRepo(p, this.git);
+      if (repo) repos.add(repo);
+    }
     for (const key of Object.keys(this.trees ?? {})) {
       if (repos.has(key)) continue;
       delete this.trees[key];
@@ -1130,11 +1145,15 @@ export class Sidebar extends Workspace {
     this.startReorder(s, dir, {
       // The section's rows in the order the app will have, not the order the
       // last paint drew: a step lands asynchronously, and the neighbour read
-      // from the painted list is the one already moved past.
+      // from the painted list is the one already moved past. Pinned rows read
+      // the pin list instead: a pin moves at the press, so the drawn order is
+      // already the order that will be, and the app's space order says nothing
+      // about it.
       ids: (list = spaces()) => {
+        const drawn = this.drawnSpaces(sect).map((x) => x.id);
+        if (/pinned$/.test(String(sect))) return drawn;
         const rank = new Map((list ?? []).map((x, i) => [x.id, i]));
-        return this.drawnSpaces(sect).map((x) => x.id)
-          .sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
+        return drawn.sort((a, b) => (rank.get(a) ?? 0) - (rank.get(b) ?? 0));
       },
       after: (moved) => { this.sel = `sp-${moved.id}`; },
     }, cx);
@@ -1898,6 +1917,11 @@ export class Sidebar extends Workspace {
     if (steps) this.slide(steps);
     // The rows the keyboard moves through, in the order they are drawn.
     this.entries = [];
+    // One pin read for this frame, whichever list draws: a place whose space is
+    // gone is drawn on its own line, and a space standing in a pin's place takes
+    // that pin — and its line — back, so exiting a pinned space's shell never
+    // reshuffles Pinned.
+    this.bindPins(frameCache("spaces", spaces));
     // One layout read for the width, the rail and the header. `layout()` copies
     // the whole tree, and this frame used to ask for it twice.
     const sort = sortOf();
@@ -2466,8 +2490,11 @@ export class Sidebar extends Workspace {
       // pins there are.
       const pinSpaceRow = (p) => {
         const key = `pin-${p.machine ?? ""}-${norm(p.folder)}`;
-        const tone = folderColor(p.folder);
-        const color = MARK[tone] ?? t[tone] ?? t.dim;
+        // The colour the place was pinned with, so the row keeps its avatar when
+        // its space's shell exits; a pin from an older build falls back to the
+        // folder's own colour.
+        const tone = p.color ?? folderColor(p.folder);
+        const color = tone.startsWith("#") ? tone : (MARK[tone] ?? t[tone] ?? t.dim);
         const name = pinLabel(p);
         return h_flex()
           .id(key)
@@ -2643,6 +2670,40 @@ export class Sidebar extends Workspace {
         .child(svg("mods/workspace-chrome/plus.svg").size(12))
         .child("New space there");
 
+      // One pin read for every machine's Pinned section: the same slots, drawn
+      // per machine, and the copy of the space list this frame already has.
+      const pinsNow = pinRows(frameCache("spaces", spaces));
+      // A pin whose space is gone still names a repo: its unopened checkouts and
+      // the worktree spaces that hang under no space any more stay under it, so
+      // closing a space hides nothing that belongs to the place.
+      const pinRepo = (p) => pinnedRepo(p, this.git);
+      const pinCheckouts = (p) => {
+        const repo = pinRepo(p);
+        if (!repo) return [];
+        const out = [];
+        for (const c of trees) {
+          const key = `${c.on ?? ""}${SEP}${tidyPath(c.path)}`;
+          if (`${c.on ?? ""}${SEP}${tidyPath(c.repoMain ?? "")}` !== repo) continue;
+          if (forest.checkoutParents.has(key) || forest.opened.has(key)) continue;
+          if (isRemoving(c.path, c.on)) continue;
+          out.push(c);
+        }
+        return orderedPaths(repo, out, (c) => c.path);
+      };
+      const pinWorktrees = (p) => {
+        const repo = pinRepo(p);
+        if (!repo) return [];
+        return orderedPaths(repo, allSpaces.filter((w) => forest.worktrees.has(w.id)
+          && !forest.parents.has(w.id)
+          && (w.machine ?? null) === (p.machine ?? null)
+          && `${w.machine ?? ""}${SEP}${tidyPath(this.checkoutRecord(w, paneList)?.main ?? "")}` === repo),
+          (w) => this.checkoutRecord(w, paneList)?.worktreePath
+            ?? this.checkoutRecord(w, paneList)?.root ?? "");
+      };
+      // What a place row drew under itself, so the Worktrees section does not
+      // draw the same row twice.
+      const drawnPinWorktrees = new Set();
+      const drawnPinCheckouts = new Set();
       for (const m of machineList) {
         const mine = top.filter((s) => (s.machine ?? null) === m);
         const mid = `mach-${m ?? "local"}`;
@@ -2652,26 +2713,35 @@ export class Sidebar extends Workspace {
           if (!open) continue;
           if (!mine.length) out.push(newSpaceRow(m));
         }
-        const pinnedSpaces = mine.filter((s) => pinOf(s));
         // A worktree is a checkout, never a row of a section: one whose repo has
         // no space here is drawn with the other unheld checkouts, below.
-        const pinnedRows = pinnedSpaces.filter((s) => !forest.worktrees.has(s.id));
         const loose = mine.filter((s) => !pinOf(s) && !forest.worktrees.has(s.id));
-        // Pins with no live space: the sheet lists them, so the queue here does
-        // too. They belong to the machine they name.
-        const orphanPins = pinnedList().filter((p) => (p.machine ?? null) === m
-          && !pinnedSpaces.some((s) => (p.id ? s.id === p.id
-            : norm(s.folder ?? "") === norm(p.folder ?? ""))));
-        if (pinnedRows.length || orphanPins.length) {
+        // One slot per pin, in the order the pins were made — the sheet draws the
+        // same order. A place whose space is gone keeps its line, and the space a
+        // click opens there takes that line back, so a pinned space never moves
+        // down the section when its shell exits.
+        const pins = pinsNow.filter(({ p }) => (p.machine ?? null) === m);
+        if (pins.length) {
           const id = manyMachines ? `${mid}-pinned` : "sec-pinned";
-          out.push(sectionHeader(id, "Pinned", "accent", pinnedRows.length + orphanPins.length));
+          out.push(sectionHeader(id, "Pinned", "accent", pins.length));
           if (!this.folded.has(id)) {
             // Their worktrees come with them: a pinned repo brings its checkouts.
-            for (const s of pinnedRows) emitSpace(s, 0, id);
-            for (const p of orphanPins) {
+            for (const { p, s } of pins) {
+              if (s && !forest.worktrees.has(s.id)) { emitSpace(s, 0, id); continue; }
               const key = `pin-${p.machine ?? ""}-${norm(p.folder)}`;
               out.push(pinSpaceRow(p));
               this.entries.push({ key, kind: "pin", pin: { ...p, machine: p.machine ?? null }, at: out.length - 1 });
+              // The place keeps its checkouts: the repo outlives the space that
+              // named it, so a closed space still shows what hangs under it.
+              for (const w of pinWorktrees(p)) {
+                emitSpace(w, 1, id);
+                drawnPinWorktrees.add(w.id);
+              }
+              for (const c of pinCheckouts(p)) {
+                out.push(checkoutRow({ machine: p.machine ?? null }, c));
+                this.entries.push({ key: `ck-${p.machine ?? ""}-${c.path}`, kind: "checkout", path: c.path, machine: p.machine ?? null, at: out.length - 1 });
+                drawnPinCheckouts.add(`${p.machine ?? ""}${SEP}${tidyPath(c.path)}`);
+              }
             }
           }
         }
@@ -2689,8 +2759,10 @@ export class Sidebar extends Workspace {
         const orphans = trees.filter((c) => (c.on ?? null) === m
           && !forest.checkoutParents.has(`${c.on ?? ""}\u0000${c.path}`)
           && !forest.opened.has(`${c.on ?? ""}\u0000${norm(c.path).replace(/\/+$/, "")}`)
+          && !drawnPinCheckouts.has(`${c.on ?? ""}${SEP}${tidyPath(c.path)}`)
           && !isRemoving(c.path, c.on));
-        const homeless = mine.filter((s) => forest.worktrees.has(s.id) && !forest.parents.has(s.id));
+        const homeless = mine.filter((s) => forest.worktrees.has(s.id) && !forest.parents.has(s.id)
+          && !drawnPinWorktrees.has(s.id));
         if (orphans.length || homeless.length) {
           const id = manyMachines ? `${mid}-worktrees` : "sec-worktrees";
           out.push(sectionHeader(id, "Worktrees", null, homeless.length + orphans.length));

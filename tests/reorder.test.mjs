@@ -80,6 +80,7 @@ function sheet() {
         reorderIds: null, reorderAfter: null,
         reorderIds: (list = spaces()) => list.map((s) => s.id),
         landBefore: () => {},
+        movePinRow: () => {},
         predictedSpaces, noteSpaceMove, aimedReorder, reorderStep, landReorder,
         stopReorder, startReorder,
       };

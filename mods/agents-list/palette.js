@@ -6,7 +6,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, agents, panes, run, closeOverlay, props, theme, settings, shared, setShared } from "herdr";
 import {
   Workspace, MARK, wash, tileOf, inkOf, marks, keycap, shortcutOf, place,
-  pinnedList, isRemoving, removingList, folderColor, pinLabel, norm, base,
+  pinnedList, pinRows, pinnedRepo, isRemoving, removingList, folderColor, pinLabel, norm, base,
   tidyPath, spaceColor, worktreeTree, RANK, askGit, listedCheckouts, pictureKey,
   beginPaint, endPaint, frameCache, scoreTerms, termsOf, spaceRecord,
   groupKeyOf, orderedPaths, movePathWithin, machineIndexOf, persistWorkspace,
@@ -271,6 +271,9 @@ export class Palette extends Workspace {
     const out = [];
     const head = (label) => out.push({ kind: "head", label });
     const all = this.liveSpaces(ps);
+    // A pin is the place: a space standing where a pin's space used to be takes
+    // that pin, so the row keeps its slot and the place stays pinned.
+    this.bindPins(all);
     const agentList = agents();
     const active = all.find((s) => s.active);
     const keyOf = (w) => `${w.on ?? ""}\u0000${w.c.path}`;
@@ -307,30 +310,48 @@ export class Palette extends Workspace {
       for (let p = parentOf(s); p; p = parentOf(p)) if (pinnedIds.has(p.id)) return false;
       return true;
     };
-    // Every pin lives in its own section above Current, the one in use too.
+    // Every pin lives in its own section above Current, the one in use too, in
+    // the slot it was pinned in: a place whose space is gone keeps its line, as
+    // it does in the sidebar, and the space a click opens there takes it back.
     const heldPins = new Set();
-    const pinRows = pinned
-      .map((p) => ({ p, s: all.find((x) => (p.id ? x.id === p.id
-        : (x.machine ?? null) === (p.machine ?? null) && norm(x.folder ?? "") === norm(p.folder)) ) }))
+    const pinRowList = pinRows(all)
       .filter(({ s }) => {
         if (!s) return true;
         if (heldPins.has(s.id)) return false;
         heldPins.add(s.id);
         return !emitted.has(s.id) && topPin(s);
       });
-    // Pinned spaces read in their real order, so moving one shows here too;
-    // pins with no space left follow.
-    const placeOf = new Map(all.map((s, i) => [s.id, i]));
-    pinRows.sort((a, b) => (a.s ? placeOf.get(a.s.id) ?? 0 : 1e6) - (b.s ? placeOf.get(b.s.id) ?? 0 : 1e6));
+    // A pin whose space is gone still names a repo: its checkouts, and the
+    // spaces standing in them, stay under the place row — the repo outlives the
+    // space that named it.
+    const pinRepo = (p) => pinnedRepo(p, this.git);
+    const pinKids = (p) => {
+      const repo = pinRepo(p);
+      if (!repo) return { spaces: [], trees: [] };
+      const spacesNow = orderedPaths(repo, all.filter((w) => this.isWorktree(w) && !parentOf(w)
+        && (w.machine ?? null) === (p.machine ?? null)
+        && `${w.machine ?? ""}${SEP}${tidyPath(this.checkoutRecord(w, ps)?.main ?? "")}` === repo),
+        (w) => this.checkoutRecord(w, ps)?.worktreePath ?? this.checkoutRecord(w, ps)?.root ?? "");
+      const treesNow = orderedPaths(repo, this.liveTrees().filter((w) => !w.c.main
+        && `${w.on ?? ""}${SEP}${tidyPath(w.repo?.main ?? "")}` === repo
+        && !emitted.has(keyOf(w))), (w) => w.c.path);
+      return { spaces: spacesNow, trees: treesNow };
+    };
     const pinStart = out.length;
-    if (pinRows.length) {
+    if (pinRowList.length) {
       // The count is pins, not top-level pin rows: a pinned worktree is drawn
       // under its repo's pinned space, and a count that skipped it read like a
       // cap on pinning.
       head(`Pinned ${pinned.length}`);
-      for (const { p, s } of pinRows) {
+      for (const { p, s } of pinRowList) {
         if (!s) {
           out.push({ kind: "pin", id: p.id ?? null, folder: p.folder, on: p.machine ?? null, name: pinLabel(p), named: Boolean(p.named) });
+          const kids = pinKids(p);
+          for (const w of kids.spaces) emit(w, 1);
+          for (const w of kids.trees) {
+            out.push({ kind: "worktree", c: w.c, repo: w.repo, on: w.on, depth: 1 });
+            emitted.add(keyOf(w));
+          }
         } else if (!emitted.has(s.id) && !this.isWorktree(s)) {
           // Its worktrees and agents come with it, the one in use too. A pinned
           // checkout is not a pin row of its own: its repo's row brings it.
@@ -438,7 +459,19 @@ export class Palette extends Workspace {
     const s = r?.kind === "space" ? r.s : null;
     if (!s) return;
     this.startReorder(s, dir, {
-      ids: (list = spaces()) => list.filter((x) => (x.machine ?? null) === (s.machine ?? null) && !this.isWorktree(x)).map((x) => x.id),
+      // The overview's order, not the ranked one: pinned places in the order
+      // they were pinned, then the rest in the app's order. With a search on,
+      // the drawn rows are ranked, and a step read from those would reverse
+      // itself.
+      ids: (list = spaces()) => {
+        const mine = list.filter((x) => (x.machine ?? null) === (s.machine ?? null) && !this.isWorktree(x));
+        const held = new Set(mine.map((x) => x.id));
+        const pinned = pinRows(list)
+          .filter(({ p, s: hit }) => (p.machine ?? null) === (s.machine ?? null) && hit && held.has(hit.id))
+          .map(({ s: hit }) => hit.id);
+        const seen = new Set(pinned);
+        return [...pinned, ...mine.map((x) => x.id).filter((id) => !seen.has(id))];
+      },
       after: (moved, step, total) => {
         this.follow = moved.id;
         if (this.filter.trim()) this.note = `${moved.name} \u00b7 ${step} of ${total}`;

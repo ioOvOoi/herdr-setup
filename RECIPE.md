@@ -96,7 +96,16 @@ not a place of its own.
 is the promise: the sidebar's two-second sweep skips a pinned space even when its
 folder is gone (it stays in the list, named `(deleted)`, with one toast), the space
 menu does not offer "Close space" while it is pinned, and the sheet answers `Ctrl+D`
-with a line instead of a dialog. A pin covers only that space: its worktrees stay
+with a line instead of a dialog. A pin is also the place: its row keeps the slot it
+was pinned in, and a space opened where a pinned space used to be — the pin row's
+own click, or one made in that folder — takes that pin, so the row comes back
+pinned in the same line. Two spaces in one folder are two places, and the pin waits
+as a place row instead of guessing which one it means. A place keeps the repo it
+names: with the space gone, its unopened checkouts and the worktree spaces that
+hang under no space any more stay under the place row, whose avatar keeps the
+colour the space wore, and the sidebar keeps reading that repo while no space
+stands there, so a space opened there binds its checkouts at once instead of after
+a scan. A pin covers only that space: its worktrees stay
 removable — the sheet's `Ctrl+D` and the sidebar's menu and `x` still ask and then
 delete the checkout, closing only the spaces that are not pinned, and a pinned space
 standing in that checkout stays behind (its folder goes, the space does not) — and
@@ -197,7 +206,8 @@ and offers to make one.
 
 **The search sheet** (720 × 560, opened by `Alt+F` or the sidebar's magnifier)
 
-- Pinned places first, then every space, with worktrees nested under their space
+- Pinned places first, in the order the pins were made (a place whose space is
+  gone keeps its line), then every space, with worktrees nested under their space
   and agents under theirs behind a `↳`. The active space wears a `current` badge
   wherever it appears; in the Pinned section a row also carries its state dot,
   since that section is not named after a state.
