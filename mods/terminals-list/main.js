@@ -167,8 +167,15 @@ export default class Terminals extends View {
               .child(title)))
             .when(!narrow && multi && Boolean(tab), (el) => el.child(div().flex_none().max_w(64).truncate().px(5).h(16).rounded(4)
               .bg(wash(t.foreground, "08")).text_size(9.5).text_color(t.dim).flex().items_center().child(tab.name)))
-            .when(Boolean(p.status), (el) => el.child(div().size(6).flex_none().rounded(3)
-              .bg(p.status === "working" ? t.accent : (t[p.status] ?? t.dim))));
+            // The row's state, drawn the way the agents' rows draw it: a ring
+            // that turns while the program works, a dot otherwise. One fixed
+            // box for both, so a change of state never nudges the title.
+            .when(Boolean(p.status), (el) => el.child(div().size(12).flex_none().flex().items_center().justify_center()
+              .tooltip(p.status === "working" ? "Working" : p.status === "blocked" ? "Needs you" : p.status === "done" ? "Done" : "Idle")
+              .when(p.status === "working", (d) => d
+                .child(svg("mods/workspace-chrome/spinner.svg").size(11).flex_none().text_color(t.accent).spin(900)))
+              .when(p.status !== "working", (d) => d
+                .child(div().size(6).flex_none().rounded(3).bg(t[p.status] ?? t.dim)))));
         }))
         .when(!rows.length, (el) => el.child(v_flex().px(narrow ? 0 : 10).pt(narrow ? 12 : 18).gap(6).items_center()
           .child(div().size(30).rounded(8).bg(wash(t.foreground, "06")).border(1).border_color(wash(t.foreground, "0c"))
