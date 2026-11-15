@@ -8,7 +8,7 @@ import {
   Workspace, MARK, wash, tileOf, inkOf, marks, keycap, shortcutOf, place,
   pinnedList, isRemoving, removingList, folderColor, pinLabel, norm, base,
   tidyPath, spaceColor, worktreeTree, RANK, askGit, listedCheckouts, pictureKey,
-  beginPaint, endPaint, frameCache, scoreTerms, termsOf, checkoutRecordOf,
+  beginPaint, endPaint, frameCache, scoreTerms, termsOf, spaceRecord,
   groupKeyOf, orderedPaths, movePathWithin, machineIndexOf, persistWorkspace,
   touchWorkspace, SEP,
 } from "./workspace-engine.js";
@@ -249,7 +249,7 @@ export class Palette extends Workspace {
     const parent = all.find((s) => s.id === id);
     return orderedPaths(groupKeyOf(parent, this.paneSnap),
       all.filter((s) => this.parent?.get(s.id) === id),
-      (w) => checkoutRecordOf(w)?.root ?? "");
+      (w) => this.checkoutRecord(w, this.paneSnap)?.root ?? "");
   }
 
   checkoutsOf(all, id, trees = this.liveTrees()) {
@@ -331,8 +331,9 @@ export class Palette extends Workspace {
       for (const { p, s } of pinRows) {
         if (!s) {
           out.push({ kind: "pin", id: p.id ?? null, folder: p.folder, on: p.machine ?? null, name: pinLabel(p), named: Boolean(p.named) });
-        } else if (!emitted.has(s.id)) {
-          // Its worktrees and agents come with it, the one in use too.
+        } else if (!emitted.has(s.id) && !this.isWorktree(s)) {
+          // Its worktrees and agents come with it, the one in use too. A pinned
+          // checkout is not a pin row of its own: its repo's row brings it.
           emit(s);
         }
       }
@@ -347,20 +348,32 @@ export class Palette extends Workspace {
       if (out[i].kind === "space" && active && out[i].s.id === active.id) activeInPins = true;
     }
     // No "Current" title: the space in use carries a "current" badge, exactly
-    // like a pinned row, and the section titles below line it off.
-    if (active && !activeInPins) emit(active, 0, new Set());
+    // like a pinned row, and the section titles below line it off. In a worktree
+    // the section starts from its repo, so the checkout is still drawn as a
+    // child and never as a place of its own. A root already drawn above (a pinned
+    // repo, its checkout in use) is not repeated here.
+    if (active && !activeInPins) {
+      const root = this.rootSpace(active, all);
+      if (!emitted.has(root.id)) emit(root, 0, new Set());
+    }
     const rest = all.filter((s) => s.id !== active?.id);
     for (const [label, rank] of [["Needs you", 4], ["Done", 3], ["Working", 2], ["Idle", 1]]) {
       // A family appears once, at its root: a worktree's row comes with its repo.
-      const roots = rest.filter((s) => !emitted.has(s.id) && (RANK[s.status] ?? 1) === rank && !parentOf(s));
+      const roots = rest.filter((s) => !emitted.has(s.id) && (RANK[s.status] ?? 1) === rank
+        && !parentOf(s) && !this.isWorktree(s));
       if (roots.length) {
         head(`${label} ${roots.length}`);
         roots.forEach((s) => emit(s));
       }
     }
+    // A checkout with no space to hang under — opened as a space, or only
+    // listed. It is a checkout here too: never a place of its own. An opened one
+    // is drawn as its space (Enter goes to it) with its agents under it.
+    const homeless = all.filter((s) => this.isWorktree(s) && !parentOf(s) && !emitted.has(s.id));
     const orphans = this.liveTrees().filter((w) => !w.c.main && !emitted.has(keyOf(w)));
-    if (orphans.length) {
-      head(`Worktrees ${orphans.length}`);
+    if (homeless.length || orphans.length) {
+      head(`Worktrees ${homeless.length + orphans.length}`);
+      for (const s of homeless) emit(s, 0, new Set());
       orphans.forEach((w) => out.push({ kind: "worktree", c: w.c, repo: w.repo, on: w.on, depth: 0 }));
     }
     return out;
@@ -437,18 +450,21 @@ export class Palette extends Workspace {
     const all = this.liveSpaces(this.paneSnap);
     const list = listedCheckouts();
     const s = r.kind === "space" ? r.s : null;
-    const rec = s ? checkoutRecordOf(s) : null;
-    let groupKey = rec?.groupKey ?? (s ? groupKeyOf(s, this.paneSnap) : null);
-    let path = rec?.root ?? null;
-    if (r.kind === "worktree") {
-      const c = list.find((x) => (x.on ?? null) === (r.on ?? null) && tidyPath(x.path) === tidyPath(r.c.path));
-      groupKey = `${r.on ?? ""}${SEP}${tidyPath(c?.repoMain ?? "")}`;
-      path = r.c.path;
-    }
+    const c = r.kind === "worktree"
+      ? list.find((x) => (x.on ?? null) === (r.on ?? null) && tidyPath(x.path) === tidyPath(r.c.path))
+      : null;
+    const rec = s ? this.checkoutRecord(s, this.paneSnap) : null;
+    // The group key is the repo's identity even before a sticky record exists:
+    // the checkout's main checkout is the key `spaceRecord` would hold.
+    const groupKey = spaceRecord(s)?.groupKey
+      ?? (rec?.main ? `${s?.machine ?? ""}${SEP}${tidyPath(rec.main)}` : null)
+      ?? (s ? groupKeyOf(s, this.paneSnap) : null)
+      ?? (c ? `${r.on ?? ""}${SEP}${tidyPath(c.repoMain ?? "")}` : null);
+    const path = c ? c.path : rec?.root ?? null;
     if (!groupKey || !path) return;
     const paths = this.pathSiblings(groupKey, all, list);
     this.startPathReorder(groupKey, path, paths, dir, cx, (moved, step, total) => {
-      const hit = all.find((x) => tidyPath(checkoutRecordOf(x)?.root ?? "") === moved);
+      const hit = all.find((x) => tidyPath(this.checkoutRecord(x, this.paneSnap)?.root ?? "") === moved);
       if (hit) { this.follow = hit.id; this.followPath = null; }
       else { this.follow = null; this.followPath = moved; }
       if (this.filter.trim()) this.note = `${base(moved)} \u00b7 ${step} of ${total}`;

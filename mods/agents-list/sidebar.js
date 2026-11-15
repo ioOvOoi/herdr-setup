@@ -252,6 +252,8 @@ export class Sidebar extends Workspace {
     this.reconnecting = storedObject("agents.reconnecting");
     for (const state of Object.values(this.reconnecting)) if (state && typeof state === "object") state.busy = false;
     this.machinesFolded = new Set(storedArray("agents.machines.folded"));
+    this.machinesAt = 0; // when the check that holds machinesRunning began
+    this.machinesGen = 0;
     this.refreshMachines(cx, true);
     cx.timer.every(15000, (cx) => this.refreshMachines(cx));
     this.gitBusy = new Set();
@@ -264,6 +266,8 @@ export class Sidebar extends Workspace {
     this.createdSeen = 0; // the one last handed to a git scan
     this.jobAt = 0; // the removal last taken from the worktrees dialog
     this.gitRunning = false;
+    this.gitStartedAt = 0; // when the pass that holds the flag began (watchdog)
+    this.gitGen = 0;       // bumped when a held pass is abandoned
     this.gitAgain = false;
     this.gitForce = false;
     // The sheet asks this copy to read. It is the one that stays mounted.
@@ -379,14 +383,25 @@ export class Sidebar extends Workspace {
 
   refreshMachines(cx, force = false) {
     if (!force && sortOf().id !== "spaces") return;
-    if (this.machinesRunning) return;
+    // `hc` can answer nothing just as a scan can (see refreshGit): a hung check
+    // must not leave the machine list stale for the rest of the session.
+    if (this.machinesRunning) {
+      if (Date.now() - (this.machinesAt ?? 0) < 30_000) return;
+      console.log("agents-list: a machine check has held for 30s; abandoning it");
+      this.machinesGen = (this.machinesGen ?? 0) + 1;
+      this.machinesRunning = false;
+    }
     this.machinesRunning = true;
+    this.machinesAt = Date.now();
+    const gen = this.machinesGen ?? 0;
     cx.spawn(async (cx) => {
       let next = this.hcMachines;
       try {
         const r = await hc(["machine", "ls", "--json"]);
         if (r.code === 0) next = (JSON.parse(r.stdout).machines ?? []).filter((m) => !m.temporary);
       } catch {}
+      // A later check owns the flag now; this answer is stale, not news.
+      if (gen !== (this.machinesGen ?? 0)) return;
       this.machinesRunning = false;
       if (JSON.stringify(next) === JSON.stringify(this.hcMachines)) return;
       this.hcMachines = next;
@@ -490,40 +505,56 @@ export class Sidebar extends Workspace {
   // git calls the default spaces list makes, cached per place for a while.
   // One scan at a time. A second request, from a watch or a new space, waits
   // and runs once more when this one finishes, instead of a pile of them.
+  //
+  // A scan that never comes back must not freeze the panel for the session: the
+  // app can take an `exec` before its core is ready and answer nothing, and the
+  // flag then stayed up until the next restart (no branch, no worktree record,
+  // a checkout reading as a space of its own). Ninety seconds is longer than any
+  // pass should take; the abandoned pass is fenced by `gitGen` so it cannot prune
+  // or persist over the one that replaces it.
   refreshGit(cx, force = false, live = false) {
     // The scan no longer depends on which sort is shown: the sticky worktree
     // record is what keeps a repo bound, and it must stay right while the
     // person works in another view too. The per-folder TTL (30 s) and the git
     // directory watch are what keep this from being a subprocess storm.
     if (this.gitRunning) {
-      this.gitAgain = true;
-      if (force) this.gitForce = true;
-      if (live) this.gitLive = true;
-      return;
+      if (Date.now() - (this.gitStartedAt ?? 0) < 90_000) {
+        this.gitAgain = true;
+        if (force) this.gitForce = true;
+        if (live) this.gitLive = true;
+        return;
+      }
+      console.log("agents-list: a git scan has held for 90s; abandoning it");
+      this.gitGen = (this.gitGen ?? 0) + 1;
+      this.gitRunning = false;
     }
     this.gitRunning = true;
+    this.gitStartedAt = Date.now();
     this.gitLive = live;
+    const gen = this.gitGen ?? 0;
     cx.spawn(async (cx) => {
       let pass = force;
       try {
         do {
           this.gitAgain = false;
           this.gitForce = false;
-          await this.scanGit(cx, pass);
+          await this.scanGit(cx, pass, gen);
           pass = this.gitForce;
-        } while (this.gitAgain);
+        } while (this.gitAgain && gen === (this.gitGen ?? 0));
       } finally {
-        this.gitRunning = false;
+        const mine = gen === (this.gitGen ?? 0);
+        if (mine) this.gitRunning = false;
         const againLive = this.gitLive;
         this.gitLive = false;
-        if (this.gitAgain) this.refreshGit(cx, this.gitForce, againLive);
+        if (this.gitAgain && mine) this.refreshGit(cx, this.gitForce, againLive);
       }
     });
   }
 
-  async scanGit(cx, force) {
+  async scanGit(cx, force, gen = this.gitGen ?? 0) {
     const ps = panes();
     const all = frameCache("spaces", spaces);
+    const stale = () => gen !== (this.gitGen ?? 0);
     const seen = new Set();
     const jobs = [];
     // Where a space is now *and* where it was made: a worktree's shell can cd
@@ -547,6 +578,9 @@ export class Sidebar extends Workspace {
     };
     const width = Math.min(4, jobs.length);
     if (width) await Promise.all(Array.from({ length: width }, () => worker()));
+    // An abandoned pass returns to a newer one's picture: it may not prune what
+    // the new pass has already read, nor write its records or its state.
+    if (stale()) return;
     for (const key of Object.keys(this.git)) if (!seen.has(key)) {
       delete this.git[key];
       changed = true;
@@ -713,6 +747,15 @@ export class Sidebar extends Workspace {
         .bg(wash(t.foreground, "07")).text_size(9.5).text_color(t.dim).flex().items_center().child(branch)))
       .when(g.ahead > 0, (el) => el.child(count(g.ahead, "\u2191", t.ansi2)))
       .when(g.behind > 0, (el) => el.child(count(g.behind, "\u2193", t.ansi1)));
+  }
+
+  // A worktree row reads its checkout's branch, the same name the sheet gives it:
+  // a space named before the branch was renamed, or made without a name, would
+  // otherwise keep the stale one.
+  worktreeName(s) {
+    if (!this.isWorktree(s)) return null;
+    const c = this.checkoutRecord(s, this.paneSnap);
+    return c?.branch ?? (c?.root ? base(c.root) : null);
   }
 
   // Every dialog the sidebar opens goes through here, so closing one always
@@ -1104,27 +1147,22 @@ export class Sidebar extends Workspace {
     const all = frameCache("spaces", spaces);
     const list = listedCheckouts();
     const s = row?.kind === "space" ? row.s : null;
-    const rec = s ? checkoutRecordOf(s) : null;
-    let groupKey = rec?.groupKey ?? (s ? groupKeyOf(s, this.paneSnap) : null);
-    let path = rec?.root ?? null;
-    let machine = s?.machine ?? null;
-    let key = s ? `sp-${s.id}` : null;
-    if (row?.kind === "checkout") {
-      const c = list.find((x) => (x.on ?? null) === (row.on ?? null) && tidyPath(x.path) === tidyPath(row.path));
-      if (!c) return;
-      groupKey = `${row.on ?? ""}${SEP}${tidyPath(c.repoMain ?? "")}`;
-      path = c.path;
-      machine = row.on ?? null;
-      key = `ck-${machine ?? ""}-${c.path}`;
-    } else if (row?.kind === "space") {
-      // A space row that is a checkout keeps its checkout path, not the folder
-      // its shell wandered to.
-      path = checkoutRecordOf(s)?.root ?? path;
-    }
+    const c0 = row?.kind === "checkout"
+      ? list.find((x) => (x.on ?? null) === (row.on ?? null) && tidyPath(x.path) === tidyPath(row.path))
+      : null;
+    const rec = s ? this.checkoutRecord(s, this.paneSnap) : null;
+    // The repo's identity, even before a sticky record exists.
+    const groupKey = spaceRecord(s)?.groupKey
+      ?? (rec?.main ? `${s?.machine ?? ""}${SEP}${tidyPath(rec.main)}` : null)
+      ?? (s ? groupKeyOf(s, this.paneSnap) : null)
+      ?? (c0 ? `${row.on ?? ""}${SEP}${tidyPath(c0.repoMain ?? "")}` : null);
+    const path = c0 ? c0.path : rec?.root ?? null;
+    const machine = c0 ? row.on ?? null : s?.machine ?? null;
+    const key = c0 ? `ck-${machine ?? ""}-${c0.path}` : s ? `sp-${s.id}` : null;
     if (!groupKey || !path) return;
     const paths = this.pathSiblings(groupKey, all, list);
     this.startPathReorder(groupKey, path, paths, dir, cx, (moved) => {
-      const hit = all.find((x) => tidyPath(checkoutRecordOf(x)?.root ?? "") === moved);
+      const hit = all.find((x) => tidyPath(this.checkoutRecord(x, this.paneSnap)?.root ?? "") === moved);
       this.sel = hit ? `sp-${hit.id}` : key;
     });
   }
@@ -2140,7 +2178,7 @@ export class Sidebar extends Workspace {
         if (!hit) {
           hit = orderedPaths(groupKeyOf(s, paneList),
             allSpaces.filter((w) => forest.parents.get(w.id) === s.id),
-            (w) => checkoutRecordOf(w)?.root ?? "");
+            (w) => this.checkoutRecord(w, paneList)?.root ?? "");
           wtOf.set(s.id, hit);
         }
         return hit;
@@ -2168,11 +2206,11 @@ export class Sidebar extends Workspace {
         const p = allSpaces.find((x) => x.id === parentId);
         if (!p) return -1;
         const paths = [
-          ...worktreesOf(p).map((w) => tidyPath(checkoutRecordOf(w)?.root ?? "")),
+          ...worktreesOf(p).map((w) => tidyPath(this.checkoutRecord(w, paneList)?.root ?? "")),
           ...checkoutsOf(p).map((c) => tidyPath(c.path)),
         ];
         const row = allSpaces.find((x) => x.id === id);
-        const path = row ? tidyPath(checkoutRecordOf(row)?.root ?? "") : "";
+        const path = row ? tidyPath(this.checkoutRecord(row, paneList)?.root ?? "") : "";
         return paths.indexOf(path);
       };
 
@@ -2215,6 +2253,10 @@ export class Sidebar extends Workspace {
         const open = !this.folded.has(id);
         const g = info.get(s.id);
         const tree = depth > 0;
+        // A checkout at the top of a section (a worktree whose repo has no space
+        // here) keeps the branch mark, not the avatar: it reads as the checkout it
+        // is, and it never gains a space's drag or its pin.
+        const linked = !tree && forest.worktrees.has(s.id);
         const pin = pinOf(s);
         const fill = spaceColor(t, s);
         // Folded, it still says what is hidden, and how urgent the agents inside
@@ -2257,8 +2299,11 @@ export class Sidebar extends Workspace {
             .when(from > index, (l) => l.top(0))))
           .on_mouse_down("left", () => {
             // A worktree is dragged inside its own repo group (it has its own
-            // persisted order); it is never a `space.move`. Anything else is a
-            // space in its section.
+            // persisted order); it is never a `space.move`. A checkout whose repo
+            // has no row here is not a space of any section: it opens on click and
+            // keeps the order its repo's list has. Anything else is a space in its
+            // section.
+            if (linked) { this.pressed = null; this.over = null; return; }
             this.pressed = s.id; this.over = s.id;
             this.pressSect = sect;
             this.pressMachine = s.machine ?? null;
@@ -2297,8 +2342,8 @@ export class Sidebar extends Workspace {
               if (was !== null && over === s.id && was !== s.id && pressTree && parent != null
                 && forest.parents.get(s.id) === parent) {
                 const from = allSpaces.find((x) => x.id === was);
-                const fromPath = checkoutRecordOf(from)?.root ?? null;
-                const toPath = checkoutRecordOf(s)?.root ?? null;
+                const fromPath = this.checkoutRecord(from, paneList)?.root ?? null;
+                const toPath = this.checkoutRecord(s, paneList)?.root ?? null;
                 if (fromPath && toPath) {
                   const p = allSpaces.find((x) => x.id === parent);
                   const groupKey = p ? groupKeyOf(p, paneList) : null;
@@ -2335,7 +2380,8 @@ export class Sidebar extends Workspace {
           .when(tree, (el) => el.child(div().absolute().left(30).top(0).bottom(0).w(1).bg(wash(t.foreground, "12"))))
           .when(tree, (el) => el.child(div().absolute().left(30).top(15).w(7).h(1).bg(wash(t.foreground, "12"))))
           .when(tree, (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(12).flex_none().text_color(t.dim)))
-          .when(!tree, (el) => el.child(div().size(18).flex_none().rounded(5).bg(fill).relative()
+          .when(linked, (el) => el.child(svg("mods/workspace-chrome/branch.svg").size(13).flex_none().text_color(t.muted)))
+          .when(!tree && !linked, (el) => el.child(div().size(18).flex_none().rounded(5).bg(fill).relative()
             .flex().items_center().justify_center()
             .border(1).border_color(s.active ? wash(t.accent, "66") : wash(t.foreground, "17"))
             .text_size(9).font_semibold().text_color("#ffffff").child([...s.name][0]?.toUpperCase() ?? "?")
@@ -2372,7 +2418,7 @@ export class Sidebar extends Workspace {
           // sidebar on the way past. A pin belongs to a space: a worktree is a
           // checkout drawn under its repo, not a place of its own to keep.
           .child(div().w(20).flex_none().flex().items_center().justify_center()
-            .when(!tree && (Boolean(pin) || hovered), (el) => el.child(div()
+            .when(!tree && !linked && (Boolean(pin) || hovered), (el) => el.child(div()
             .id(`spin-${s.id}`)
             .size(18)
             .flex_none()
@@ -2607,18 +2653,21 @@ export class Sidebar extends Workspace {
           if (!mine.length) out.push(newSpaceRow(m));
         }
         const pinnedSpaces = mine.filter((s) => pinOf(s));
-        const loose = mine.filter((s) => !pinOf(s));
+        // A worktree is a checkout, never a row of a section: one whose repo has
+        // no space here is drawn with the other unheld checkouts, below.
+        const pinnedRows = pinnedSpaces.filter((s) => !forest.worktrees.has(s.id));
+        const loose = mine.filter((s) => !pinOf(s) && !forest.worktrees.has(s.id));
         // Pins with no live space: the sheet lists them, so the queue here does
         // too. They belong to the machine they name.
         const orphanPins = pinnedList().filter((p) => (p.machine ?? null) === m
           && !pinnedSpaces.some((s) => (p.id ? s.id === p.id
             : norm(s.folder ?? "") === norm(p.folder ?? ""))));
-        if (pinnedSpaces.length || orphanPins.length) {
+        if (pinnedRows.length || orphanPins.length) {
           const id = manyMachines ? `${mid}-pinned` : "sec-pinned";
-          out.push(sectionHeader(id, "Pinned", "accent",
-            pinnedSpaces.filter((s) => !forest.worktrees.has(s.id)).length + orphanPins.length));
+          out.push(sectionHeader(id, "Pinned", "accent", pinnedRows.length + orphanPins.length));
           if (!this.folded.has(id)) {
-            for (const s of pinnedSpaces) emitSpace(s, 0, id);
+            // Their worktrees come with them: a pinned repo brings its checkouts.
+            for (const s of pinnedRows) emitSpace(s, 0, id);
             for (const p of orphanPins) {
               const key = `pin-${p.machine ?? ""}-${norm(p.folder)}`;
               out.push(pinSpaceRow(p));
@@ -2633,18 +2682,24 @@ export class Sidebar extends Workspace {
           out.push(sectionHeader(id, SECTION[r], SECTION_STATUS[r], members.length));
           if (!this.folded.has(id)) members.forEach((s) => emitSpace(s, 0, id));
         }
-        // A checkout with no space to hang under. The sheet lists these too;
-        // leaving them out here is how the two views disagreed.
+        // A checkout with no space to hang under — opened as a space, or only
+        // listed. The sheet lists these too; leaving them out here is how the two
+        // views disagreed. An opened one keeps its space (and its agents) and is
+        // still drawn as a checkout, never as a place of its own.
         const orphans = trees.filter((c) => (c.on ?? null) === m
           && !forest.checkoutParents.has(`${c.on ?? ""}\u0000${c.path}`)
           && !forest.opened.has(`${c.on ?? ""}\u0000${norm(c.path).replace(/\/+$/, "")}`)
           && !isRemoving(c.path, c.on));
-        if (orphans.length) {
+        const homeless = mine.filter((s) => forest.worktrees.has(s.id) && !forest.parents.has(s.id));
+        if (orphans.length || homeless.length) {
           const id = manyMachines ? `${mid}-worktrees` : "sec-worktrees";
-          out.push(sectionHeader(id, "Worktrees", null, orphans.length));
-          if (!this.folded.has(id)) for (const c of orphans) {
-            out.push(checkoutRow({ machine: m }, c));
-            this.entries.push({ key: `ck-${m ?? ""}-${c.path}`, kind: "checkout", path: c.path, machine: m ?? null, at: out.length - 1 });
+          out.push(sectionHeader(id, "Worktrees", null, homeless.length + orphans.length));
+          if (!this.folded.has(id)) {
+            for (const s of homeless) emitSpace(s, 0, id);
+            for (const c of orphans) {
+              out.push(checkoutRow({ machine: m }, c));
+              this.entries.push({ key: `ck-${m ?? ""}-${c.path}`, kind: "checkout", path: c.path, machine: m ?? null, at: out.length - 1 });
+            }
           }
         }
       }

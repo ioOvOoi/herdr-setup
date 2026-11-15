@@ -624,6 +624,43 @@ export function listedCheckouts() {
   return out;
 }
 
+// The checkouts the picture already lists, by the place a space would stand in.
+// A space living in one of them *is* that checkout before git has answered for
+// its folder: a scan that is behind, or a checkout made outside
+// `<home>/worktrees/<repo>/`, otherwise read as a place of its own while this
+// very list already drew its row under the repo — the same worktree twice.
+// One map per paint; the list is the sidebar's, so both views agree.
+export function knownCheckouts() {
+  return frameCache("checkouts.byPath", () => {
+    const map = new Map();
+    for (const c of listedCheckouts()) {
+      if (c.main) continue;
+      map.set(`${c.on ?? ""}${SEP}${tidyPath(c.path)}`, c);
+    }
+    return map;
+  });
+}
+
+// The listed checkout a space stands in, from the folders it may be at: where it
+// is now and where it was made. `null` leaves the answer to git and the path
+// guess, exactly as before.
+export function knownCheckoutAt(on, folders) {
+  const map = knownCheckouts();
+  for (const folder of folders ?? []) {
+    if (!folder) continue;
+    const hit = map.get(`${on ?? ""}${SEP}${tidyPath(folder)}`);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+// A space's listed checkout, when its own view has no pane snapshot.
+export function knownCheckoutFor(s, ps) {
+  if (!s) return null;
+  const at = ps ? place(s, ps) : place(s);
+  return knownCheckoutAt(s.machine ?? null, [at, s.folder]);
+}
+
 // The repo a folder belongs to: main checkout, name, and whether this is a linked worktree.
 export async function repoOf(folder, on) {
   const key = `${on ?? ""}${SEP}${tidyPath(folder)}`;
@@ -775,6 +812,19 @@ export function worktreeTree(all, gitOf, trees, ps) {
     const g = gitOf(s);
     if (g?.main) {
       return { main: norm(g.main), root: g.root ? norm(g.root) : null, linked: Boolean(g.linked), branch: g.branch ?? null };
+    }
+    // A checkout the picture already lists decides before the path guess: that
+    // list is where the row under the repo comes from, so a space standing there
+    // must be that row, never a space beside it (a checkout outside
+    // `<home>/worktrees/<repo>/` had no other way to be recognised).
+    const known = knownCheckoutAt(onOf(s), [at(s), s.folder]);
+    if (known) {
+      return {
+        main: known.repoMain ? norm(known.repoMain) : null,
+        root: norm(known.path),
+        linked: true,
+        branch: known.branch ?? null,
+      };
     }
     const path = [at(s), s.folder].map(norm)
       .find((p) => /(?:^|\/)worktrees\/[^/]+\/[^/]+\/?$/.test(p)) ?? norm(at(s) ?? s.folder ?? "");
@@ -974,15 +1024,36 @@ export class Workspace extends View {
     const made = probe(s?.folder);
     if (live?.linked) return live;
     if (made?.linked) return made;
+    // git has not answered for this space yet: the checkout the picture lists is
+    // still the truth, and it carries the branch the row reads before the scan.
+    const known = knownCheckoutAt(s?.machine ?? null, [at, s?.folder]);
+    if (known) {
+      return {
+        name: base(known.repoMain ?? known.path),
+        branch: known.branch ?? null,
+        repo: known.repoMain ? `${s?.machine ?? ""}${SEP}${known.repoMain}` : null,
+        root: known.path,
+        linked: true,
+        ahead: 0,
+        behind: 0,
+      };
+    }
     if (live !== undefined) return live;
     return made ?? null;
   }
 
   // The checkout a space stands in. The sticky record wins over every path
   // heuristic: it is what keeps a worktree a worktree after its shell `cd`s
-  // out of it. The in-memory git answer is the fallback for the first frame.
+  // out of it. The in-memory git answer is the fallback for the first frame, and
+  // the listed checkout (the row already drawn under its repo) the frame after
+  // a space is made, when git has not answered for its folder yet.
   checkoutRecord(s, ps) {
-    return checkoutRecordOf(s) ?? this.gitCheckout(s, ps);
+    const rec = checkoutRecordOf(s);
+    if (rec) return rec;
+    const g = this.gitCheckout(s, ps);
+    if (g) return g;
+    const known = knownCheckoutFor(s, ps ?? this.paneSnap);
+    return known ? { main: known.repoMain ?? null, root: known.path, linked: true, branch: known.branch ?? null } : null;
   }
 
   // The git-only answer, used before the first scan and by the scanner.
@@ -1020,6 +1091,9 @@ export class Workspace extends View {
     // for good, and its shell wandering off does not make it a space again.
     const here = this.paneSnap ? place(s, this.paneSnap) : place(s);
     if (inWorktrees(here) || inWorktrees(s.folder)) return true;
+    // The checkout the picture lists, whatever its folder is called: a worktree
+    // made anywhere is a worktree from the frame it is opened, not a tick later.
+    if (knownCheckoutAt(s.machine ?? null, [here, s.folder])) return true;
     if (!this.git) return false;
     const on = s.machine ?? "";
     if (this.git[`${on}${SEP}${tidyPath(here ?? "")}`]?.linked) return true;
@@ -1035,6 +1109,23 @@ export class Workspace extends View {
   // shell happens to be, so cd-ing out of it cannot rename the row.
   spaceName(s) {
     return this.worktreeName(s) ?? s?.name ?? "";
+  }
+
+  // The top of a space's family: a worktree's repo, else the space itself. The
+  // sheet never puts a checkout at the top of a section — it is its repo's child,
+  // so a section that starts from the space in use starts from the top. `all` is
+  // the list already in hand, so this asks the host for nothing.
+  rootSpace(s, all = spaces()) {
+    if (!s || !this.parent) return s;
+    let top = s;
+    const seen = new Set([s.id]);
+    for (let id = this.parent.get(top.id); id && !seen.has(id); id = this.parent.get(top.id)) {
+      const p = all.find((x) => x.id === id);
+      if (!p) break;
+      seen.add(p.id);
+      top = p;
+    }
+    return top;
   }
 
   // A checkout nobody has opened becomes a space there, named after its branch so
