@@ -101,7 +101,7 @@ check("the sidebar names a row through the shared rule",
 check("the sheet names a row through the shared rule",
   /this\.label\(this\.spaceName\(s\)/.test(palette) && /\.child\(\[\.\.\.this\.spaceName\(s\)\]/.test(palette));
 check("the sidebar answers with the checkout's branch",
-  /worktreeName\(s\) \{[\s\S]{0,260}return g\?\.branch/.test(sidebar));
+  /worktreeName\(s\) \{[\s\S]{0,260}return c\?\.branch/.test(sidebar));
 check("the sheet answers with the checkout's branch",
   /worktreeName\(s\) \{[\s\S]{0,260}return c\?\.branch/.test(palette));
 

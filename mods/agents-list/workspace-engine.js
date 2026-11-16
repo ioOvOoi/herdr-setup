@@ -920,6 +920,33 @@ export function worktreeTree(all, gitOf, trees, ps) {
 
 export const RANK = { blocked: 4, done: 3, working: 2, idle: 1 };
 
+// The one order every view draws places in: pinned places first, in the order
+// they were pinned, then what needs you, then done, working and idle. The app's
+// own order holds inside a group, so a reorder stays where it landed and a
+// status tick only moves a place between groups. `pins` is `pinRows(all)`; an
+// orphan pin has no place here. A worktree is a checkout, not a place: callers
+// leave worktrees out and draw them under their repo.
+export function orderedPlaces(all, pins = []) {
+  const pinAt = new Map();
+  for (const row of pins ?? []) {
+    const id = row?.s?.id ?? row?.id;
+    if (id && !pinAt.has(id)) pinAt.set(id, pinAt.size);
+  }
+  const at = new Map((all ?? []).map((s, i) => [s.id, i]));
+  return [...(all ?? [])].sort((a, b) => {
+    const ap = pinAt.get(a.id);
+    const bp = pinAt.get(b.id);
+    if (ap != null || bp != null) {
+      if (ap == null) return 1;
+      if (bp == null) return -1;
+      if (ap !== bp) return ap - bp;
+    }
+    const ar = RANK[a.status ?? "idle"] ?? RANK.idle;
+    const br = RANK[b.status ?? "idle"] ?? RANK.idle;
+    return br - ar || (at.get(a.id) ?? 0) - (at.get(b.id) ?? 0);
+  });
+}
+
 // What both views inherit. Everything here is one rule with two callers: a pin,
 // a removal, a worktree, a step, an action on the selected row.
 export class Workspace extends View {

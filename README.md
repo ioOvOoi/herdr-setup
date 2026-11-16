@@ -29,7 +29,9 @@ the window, and a narrow sidebar folds into a rail of avatars and state marks.
   the checkout leaves the list on the press while git works behind it, and only
   a failure brings it back, with the reason.
 - **A rail when narrow.** Below 160 px the sidebar becomes a column of space
-  avatars and state marks; past nine spaces an ellipsis expands it again.
+  avatars and state marks, in the same order as the open list — pinned places
+  first, then what needs you, done, working and idle; past nine spaces an
+  ellipsis expands it again.
 - **A searchable keys sheet** — every shortcut in one list, one row per command.
 
 ## Requirements

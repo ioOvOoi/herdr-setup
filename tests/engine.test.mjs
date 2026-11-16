@@ -52,6 +52,7 @@ function engine() {
   const workspace = { spacePins: {}, order: {}, dirty: false };
   const factory = new Function("workspace", "tidyPath", "base",
     `const asObject = (v) => (v && typeof v === "object" && !Array.isArray(v) ? v : null);
+     ${constant("RANK")}
      ${lift("spaceRecord")}
      ${lift("noteSpaceRecord")}
      ${lift("pinSpace")}
@@ -59,7 +60,8 @@ function engine() {
      ${lift("orderedPaths")}
      ${lift("movePathWithin")}
      ${lift("machineIndexOf")}
-     return { spaceRecord, noteSpaceRecord, pinSpace, orderOf, orderedPaths, movePathWithin, machineIndexOf };`);
+     ${lift("orderedPlaces")}
+     return { spaceRecord, noteSpaceRecord, pinSpace, orderOf, orderedPaths, movePathWithin, machineIndexOf, orderedPlaces };`);
   return { workspace, api: factory(workspace, tidyPath, base) };
 }
 
@@ -121,6 +123,32 @@ const key = (main) => `\u001f${main}`;
       === JSON.stringify([WT, "/new"]));
 }
 
+// ---- one order for the rail, the sidebar and the sheet ---------------------
+{
+  const { api } = engine();
+  const all = [
+    { id: "idle1", name: "idle one", status: "idle" },
+    { id: "work", name: "working", status: "working" },
+    { id: "pinB", name: "pinned idle", status: "idle" },
+    { id: "blocked", name: "blocked", status: "blocked" },
+    { id: "done", name: "done", status: "done" },
+    { id: "pinA", name: "pinned done", status: "done" },
+    { id: "idle2", name: "idle two", status: "idle" },
+  ];
+  const pins = [{ s: { id: "pinA" } }, { s: { id: "pinB" } }, { s: null, id: "gone" }];
+  const got = api.orderedPlaces(all, pins).map((s) => s.id);
+  check("places read pinned first, then needs you, done, working, idle",
+    JSON.stringify(got) === JSON.stringify(["pinA", "pinB", "blocked", "done", "work", "idle1", "idle2"]),
+    JSON.stringify(got));
+  check("the app's order holds inside a group",
+    api.orderedPlaces(all, []).map((s) => s.id).join(",") === "blocked,done,pinA,work,idle1,pinB,idle2",
+    JSON.stringify(api.orderedPlaces(all, []).map((s) => s.id)));
+  check("a pin whose place is gone does not drop a place",
+    api.orderedPlaces(all, [{ s: null, id: "gone" }]).length === all.length);
+  check("a missing status reads as idle",
+    api.orderedPlaces([{ id: "unknown" }, { id: "idle", status: "idle" }], []).map((s) => s.id).join(",") === "unknown,idle");
+}
+
 // ---- space.move takes a machine-scoped position ----------------------------
 {
   const { api } = engine();
@@ -146,7 +174,7 @@ const key = (main) => `\u001f${main}`;
   check("the sheet hydrates the shared picture first",
     /this\.initShared\(\);/.test(init));
   check("a space's checkout comes from the sticky record first",
-    /checkoutRecord\(s, ps\) \{\n    return checkoutRecordOf\(s\) \?\? this\.gitCheckout\(s, ps\);/.test(src));
+    /checkoutRecord\(s, ps\) \{\n    const rec = checkoutRecordOf\(s\);\n    if \(rec\) return rec;/.test(src));
   check("worktree identity is the record, not a folder prefix",
     /isWorktree\(s\) \{\n    if \(!s\) return false;\n    const rec = spaceRecord\(s\);\n    if \(rec\) return Boolean\(rec\.isWorktree\);/.test(src));
   // Ctrl+J/K arrive as a shared write from `handle`; another copy's write does

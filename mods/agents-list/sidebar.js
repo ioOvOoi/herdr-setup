@@ -11,7 +11,7 @@ import {
   onGitRefresh, takeGitAsk, touchWorkspace, listedCheckouts, pictureKey,
   beginPaint, endPaint, frameCache, spaceRecord, pinSpace, persistWorkspace,
   checkoutRecordOf, groupKeyOf, worktreeSiblings, movePathWithin, machineIndexOf,
-  orderedPaths, SEP,
+  orderedPaths, orderedPlaces, SEP,
 } from "./workspace-engine.js";
 
 // The block that shows a given mod, and the column around it.
@@ -65,10 +65,18 @@ const sidebarDialog = (overlay) => {
 // To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
 function toggleSidebar() {
   const width = find(layout(), "sidebar")?.size?.px;
-  if (!narrow()) setShared("sidebar.width", width);
+  const collapsing = !narrow();
+  if (collapsing) setShared("sidebar.width", width);
   // Mods edited before the rail went by width still read the flag.
-  setShared("sidebar.collapsed", !narrow());
-  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 223) : window()?.platform === "macos" ? 76 : 44 });
+  setShared("sidebar.collapsed", collapsing);
+  const px = collapsing ? (window()?.platform === "macos" ? 76 : 44) : (shared("sidebar.width") ?? 223);
+  // The rail owns the whole sidebar from the first frame, not when the width
+  // timer next runs. Hiding the blocks below it before the resize keeps the
+  // bottom controls on the window's edge instead of letting them jump there a
+  // frame later. Expanding shows them back with the width.
+  if (collapsing) fitRailTo(px, find(layout(), "sidebar"));
+  run("layout.resize", { id: "sidebar", px });
+  if (!collapsing) fitRailTo(px, find(layout(), "sidebar"));
 }
 
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
@@ -91,6 +99,44 @@ const storedArray = (key) => {
   const value = stored(key, []);
   return Array.isArray(value) ? value : [];
 };
+
+// The blocks in the sidebar that are not on the rail's path: everything below
+// the agents block, at any depth the layout happens to use. The rail is the
+// whole column, so those blocks step aside while it is shown.
+function railBlockIds(node) {
+  const holds = (n) => n?.content?.mod === "agents-list" || (n.children ?? []).some(holds);
+  const ids = [];
+  const collect = (n) => {
+    for (const child of n?.children ?? []) {
+      if (holds(child)) collect(child);
+      else if (child.id && !child.hidden) ids.push(child.id);
+    }
+  };
+  collect(node);
+  return ids;
+}
+
+// Put the sidebar in (or out of) rail mode for a known width. The width is
+// passed in because the caller has just asked for it: the layout still reads
+// the old one until the host applies the resize. The stored list is what a
+// restart (or a second fit) uses to put back only the blocks this hid.
+function fitRailTo(width, node) {
+  const hid = storedArray("rail.hid");
+  if (width < 160 && node && !node.hidden) {
+    if (hid.length) return false;
+    const ids = railBlockIds(node);
+    if (!ids.length) return false;
+    localStorage.setItem("rail.hid", JSON.stringify(ids));
+    for (const id of ids) run("layout.hide", { id });
+    return true;
+  }
+  if (hid.length) {
+    for (const id of hid) run("layout.show", { id });
+    localStorage.removeItem("rail.hid");
+    return true;
+  }
+  return false;
+}
 
 function leadPanes(all) {
   const leads = new Map();
@@ -736,13 +782,6 @@ export class Sidebar extends Workspace {
     return changed;
   }
 
-  // A worktree space keeps its checkout's name: the branch, else its folder.
-  worktreeName(s) {
-    if (!this.isWorktree(s)) return null;
-    const g = this.checkoutRecord(s, this.paneSnap);
-    return g?.branch ?? (g?.root ? base(g.root) : null) ?? (s?.folder ? base(s.folder) : null);
-  }
-
   // Only what's unusual, after the name: "herdr · spike ↑2 ↓1". The repo or the
   // branch goes when the name already says it, and master/main go: nearly every
   // space is on one. Same rule as the default spaces list.
@@ -770,11 +809,12 @@ export class Sidebar extends Workspace {
 
   // A worktree row reads its checkout's branch, the same name the sheet gives it:
   // a space named before the branch was renamed, or made without a name, would
-  // otherwise keep the stale one.
+  // otherwise keep the stale one. Before a scan answers, the folder it was made
+  // in is the one name it still has.
   worktreeName(s) {
     if (!this.isWorktree(s)) return null;
     const c = this.checkoutRecord(s, this.paneSnap);
-    return c?.branch ?? (c?.root ? base(c.root) : null);
+    return c?.branch ?? (c?.root ? base(c.root) : null) ?? (s?.folder ? base(s.folder) : null);
   }
 
   // Every dialog the sidebar opens goes through here, so closing one always
@@ -1487,36 +1527,11 @@ export class Sidebar extends Workspace {
   // Collapsed, this mod is the whole sidebar: the blocks below it have nothing
   // to show at 44 px — their mods draw nothing there — so they step aside and
   // the rail's controls land on the window's bottom edge instead of at the
-  // bottom of one third of it. Only the blocks this put away are put back, and
-  // the list is remembered, so a restart while collapsed restores them too.
+  // bottom of one third of it. `toggleSidebar` fits at the press; this method is
+  // the width clock for a drag and the restart path.
   fitRail(px) {
-    const hid = storedArray("rail.hid");
-    const known = typeof px === "number";
-    const sidebar = known ? null : find(layout(), "sidebar");
-    const width = known ? px : (sidebar?.size?.px ?? Infinity);
-    const node = known && width < 160 ? find(layout(), "sidebar") : sidebar;
-    if (width < 160 && node && !node.hidden) {
-      if (hid.length) return;
-      // Everything in the sidebar that is not on this block's path: a block
-      // below the rail has nothing to draw at 44 px, and a nested column around
-      // it is not a block at all, so both kinds go — the whole sidebar becomes
-      // the rail, at any depth the layout happens to use.
-      const holds = (n) => n?.content?.mod === "agents-list" || (n.children ?? []).some(holds);
-      const ids = [];
-      const collect = (node) => {
-        for (const child of node?.children ?? []) {
-          if (holds(child)) collect(child);
-          else if (child.id && !child.hidden) ids.push(child.id);
-        }
-      };
-      collect(node);
-      if (!ids.length) return;
-      localStorage.setItem("rail.hid", JSON.stringify(ids));
-      for (const id of ids) run("layout.hide", { id });
-    } else if (hid.length) {
-      for (const id of hid) run("layout.show", { id });
-      localStorage.removeItem("rail.hid");
-    }
+    const sidebar = find(layout(), "sidebar");
+    fitRailTo(typeof px === "number" ? px : (sidebar?.size?.px ?? Infinity), sidebar);
   }
 
   // The rail's state, at the avatar's corner: a spinner while working, a "!"
@@ -1949,11 +1964,14 @@ export class Sidebar extends Workspace {
     if (steps) this.slide(steps);
     // The rows the keyboard moves through, in the order they are drawn.
     this.entries = [];
-    // One pin read for this frame, whichever list draws: a place whose space is
-    // gone is drawn on its own line, and a space standing in a pin's place takes
-    // that pin — and its line — back, so exiting a pinned space's shell never
-    // reshuffles Pinned.
-    this.bindPins(frameCache("spaces", spaces));
+    // One space and one pin read for this frame, whichever list draws: a place
+    // whose space is gone is drawn on its own line, and a space standing in a
+    // pin's place takes that pin — and its line — back, so exiting a pinned
+    // space's shell never reshuffles Pinned. The rail and the expanded tree read
+    // the same two lists, so collapsing changes the drawing and nothing else.
+    const spaceList = frameCache("spaces", spaces);
+    this.bindPins(spaceList);
+    const pinsNow = pinRows(spaceList);
     // One layout read for the width, the rail and the header. `layout()` copies
     // the whole tree, and this frame used to ask for it twice.
     const sort = sortOf();
@@ -2038,17 +2056,29 @@ export class Sidebar extends Workspace {
       // places, each with its avatar; the checkout stays in the expanded tree and search.
       // A worktree is a checkout under its repo, never a place of its own; the
       // shared rule knows one even after its shell cds out.
-      const places = frameCache("spaces", spaces).filter((sp) => !this.isWorktree(sp)
+      const places = spaceList.filter((sp) => !this.isWorktree(sp)
         && !isRemoving(place(sp, paneList), sp.machine) && !isRemoving(sp.folder, sp.machine));
-      return this.rail(t, places.map((sp, i) => ({
-        key: sp.id,
-        tip: [this.spaceName(sp), STATE[sp.status], i < RAIL_MAX_SPACES ? `Ctrl+${i + 1}` : null].filter(Boolean).join(" \u00b7 "),
-        active: sp.active,
-        status: sp.status,
-        fill: spaceColor(t, sp),
-        initial: initial(this.spaceName(sp)),
-        act: () => run("space.select", { id: sp.id }),
-      })), "rail-spaces", RAIL_MAX_SPACES);
+      // The same places, in the same order both lists draw: pinned slots first,
+      // then needs you, done, working, idle. Collapsing the sidebar must not
+      // reshuffle the avatars, and a status tick must move a cell only when it
+      // moves the row.
+      const placed = orderedPlaces(places, pinsNow);
+      // Ctrl+1…Ctrl+9 select by the app's own space index, not the rail's: after
+      // grouping, the nth cell is not the nth space. Only a cell whose key really
+      // selects it names that key.
+      const appAt = new Map(spaceList.map((sp, i) => [sp.id, i]));
+      return this.rail(t, placed.map((sp) => {
+        const at = appAt.get(sp.id);
+        return {
+          key: sp.id,
+          tip: [this.spaceName(sp), STATE[sp.status], at != null && at < RAIL_MAX_SPACES ? `Ctrl+${at + 1}` : null].filter(Boolean).join(" \u00b7 "),
+          active: sp.active,
+          status: sp.status,
+          fill: spaceColor(t, sp),
+          initial: initial(this.spaceName(sp)),
+          act: () => run("space.select", { id: sp.id }),
+        };
+      }), "rail-spaces", RAIL_MAX_SPACES);
     }
 
     // Each row comes back with the thing it stands for, so the keyboard can walk
@@ -2703,12 +2733,12 @@ export class Sidebar extends Workspace {
         .child(svg("mods/workspace-chrome/plus.svg").size(12))
         .child("New space there");
 
-      // One pin read for every machine's Pinned section: the same slots, drawn
-      // per machine, and the copy of the space list this frame already has.
-      const pinsNow = pinRows(frameCache("spaces", spaces));
-      // A pin whose space is gone still names a repo: its unopened checkouts and
-      // the worktree spaces that hang under no space any more stay under it, so
-      // closing a space hides nothing that belongs to the place.
+      // The pins were read once at the top of the frame: the rail and the Pinned
+      // section use the same slots. A pin whose space is gone still names a repo:
+      // its unopened checkouts and the worktree spaces that hang under no space
+      // any more stay under it, so closing a space hides nothing that belongs to
+      // the place.
+      const pinnedIds = new Set(pinsNow.filter(({ s }) => s).map(({ s }) => s.id));
       const pinRepo = (p) => pinnedRepo(p, this.git);
       const pinCheckouts = (p) => {
         const repo = pinRepo(p);
@@ -2738,7 +2768,9 @@ export class Sidebar extends Workspace {
       const drawnPinWorktrees = new Set();
       const drawnPinCheckouts = new Set();
       for (const m of machineList) {
-        const mine = top.filter((s) => (s.machine ?? null) === m);
+        // The one order the rail, this tree and the sheet share: pinned places
+        // in their slots, then what needs you, done, working, idle.
+        const mine = orderedPlaces(top.filter((s) => (s.machine ?? null) === m), pinsNow);
         const mid = `mach-${m ?? "local"}`;
         const open = !this.machinesFolded.has(m ?? "");
         if (manyMachines) {
@@ -2748,7 +2780,7 @@ export class Sidebar extends Workspace {
         }
         // A worktree is a checkout, never a row of a section: one whose repo has
         // no space here is drawn with the other unheld checkouts, below.
-        const loose = mine.filter((s) => !pinOf(s) && !forest.worktrees.has(s.id));
+        const loose = mine.filter((s) => !pinnedIds.has(s.id) && !forest.worktrees.has(s.id));
         // One slot per pin, in the order the pins were made — the sheet draws the
         // same order. A place whose space is gone keeps its line, and the space a
         // click opens there takes that line back, so a pinned space never moves

@@ -9,7 +9,7 @@ import {
   pinnedList, pinRows, pinnedRepo, isRemoving, removingList, folderColor, pinLabel, norm, base,
   tidyPath, spaceColor, worktreeTree, RANK, askGit, listedCheckouts, pictureKey,
   beginPaint, endPaint, frameCache, scoreTerms, termsOf, spaceRecord,
-  groupKeyOf, orderedPaths, movePathWithin, machineIndexOf, persistWorkspace,
+  groupKeyOf, orderedPaths, orderedPlaces, movePathWithin, machineIndexOf, persistWorkspace,
   touchWorkspace, SEP,
 } from "./workspace-engine.js";
 
@@ -275,14 +275,13 @@ export class Palette extends Workspace {
     // that pin, so the row keeps its slot and the place stays pinned.
     this.bindPins(all);
     const agentList = agents();
-    const active = all.find((s) => s.active);
     const keyOf = (w) => `${w.on ?? ""}\u0000${w.c.path}`;
     const kids = (id) => this.kidsOf(all, id);
     const ckids = (id) => this.checkoutsOf(all, id);
     const parentOf = (s) => { const id = this.parent?.get(s.id); return id ? all.find((x) => x.id === id) : null; };
     const emitted = new Set();
-    // `seen` is the section's own list: Pinned and Current both show the one
-    // space in use, so each walks its tree again with its own set.
+    // `seen` is a section's own list: a place walks its tree again under Pinned,
+    // so a family drawn twice does not draw the same child twice.
     const emit = (s, depth = 0, seen = emitted) => {
       out.push({ kind: "space", s, depth });
       seen.add(s.id);
@@ -297,7 +296,7 @@ export class Palette extends Workspace {
         emitted.add(keyOf(w));
       }
     };
-    // Pinned spaces get their own section above Current, with their own trees,
+    // Pinned spaces get their own section above the rest, with their own trees,
     // whether or not anything runs there: a space that is gone leaves a row that
     // starts a shell in its folder. A pinned child of a pinned space comes with
     // its parent.
@@ -310,7 +309,7 @@ export class Palette extends Workspace {
       for (let p = parentOf(s); p; p = parentOf(p)) if (pinnedIds.has(p.id)) return false;
       return true;
     };
-    // Every pin lives in its own section above Current, the one in use too, in
+    // Every pin lives in its own section above the rest, the one in use too, in
     // the slot it was pinned in: a place whose space is gone keeps its line, as
     // it does in the sidebar, and the space a click opens there takes it back.
     const heldPins = new Set();
@@ -359,27 +358,16 @@ export class Palette extends Workspace {
         }
       }
     }
-    // Only the Pinned section says "pinned": a row under Current is not a pin.
-    // A space in use that already shows under Pinned — pinned itself, or a
-    // worktree of a pinned space — lives there alone, marked "current". One
-    // that isn't in Pinned has no other home, so Current shows it.
-    let activeInPins = false;
-    for (let i = pinStart; i < out.length; i++) {
-      out[i].inPins = true;
-      if (out[i].kind === "space" && active && out[i].s.id === active.id) activeInPins = true;
-    }
-    // No "Current" title: the space in use carries a "current" badge, exactly
-    // like a pinned row, and the section titles below line it off. In a worktree
-    // the section starts from its repo, so the checkout is still drawn as a
-    // child and never as a place of its own. A root already drawn above (a pinned
-    // repo, its checkout in use) is not repeated here.
-    if (active && !activeInPins) {
-      const root = this.rootSpace(active, all);
-      if (!emitted.has(root.id)) emit(root, 0, new Set());
-    }
-    const rest = all.filter((s) => s.id !== active?.id);
+    // Only the Pinned section says "pinned": a row drawn below is not one.
+    for (let i = pinStart; i < out.length; i++) out[i].inPins = true;
+    // The one order the rail, the sidebar and this sheet share: pinned places
+    // first in their slots, then needs you, done, working, idle, with the app's
+    // order inside a group. The space in use keeps its place in that order and
+    // wears a "current" badge; it is not hoisted out of its section. A family
+    // appears once, at its root: a worktree's row comes with its repo, and a root
+    // already drawn above (a pinned repo) is not repeated.
+    const rest = orderedPlaces(all, pinRowList);
     for (const [label, rank] of [["Needs you", 4], ["Done", 3], ["Working", 2], ["Idle", 1]]) {
-      // A family appears once, at its root: a worktree's row comes with its repo.
       const roots = rest.filter((s) => !emitted.has(s.id) && (RANK[s.status] ?? 1) === rank
         && !parentOf(s) && !this.isWorktree(s));
       if (roots.length) {

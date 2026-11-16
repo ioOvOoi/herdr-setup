@@ -229,7 +229,7 @@ check("an agent can be stopped from the sidebar's menu, whatever its space's pin
 // the pin affordance on a worktree row was lost once already (the edit that was
 // meant to add `!tree` wrote nothing), so all three places are pinned down here.
 check("no pin on a worktree row, hovered or not",
-  /\.when\(!tree && \(Boolean\(pin\) \|\| hovered\)/.test(sidebar));
+  /\.when\(!tree && !linked && \(Boolean\(pin\) \|\| hovered\)/.test(sidebar));
 check("the space menu does not offer to pin a worktree",
   /isWorktreeSpace \? \[\] : \[\{ id: "sm-pin"/.test(sidebar));
 check("the shared pin row refuses a worktree",

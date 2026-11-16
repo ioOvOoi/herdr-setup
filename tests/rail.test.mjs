@@ -39,7 +39,26 @@ for (const n of [10, 12]) {
 const all = railShown(cells(12), null);
 check("no limit leaves the agent rail whole", all.shown.length === 12 && all.beyond === 0);
 check("the rail lists places, not worktree checkouts",
-  /frameCache\("spaces", spaces\)\.filter\(\(sp\) => !this\.isWorktree\(sp\)/.test(src));
+  /spaceList\.filter\(\(sp\) => !this\.isWorktree\(sp\)/.test(src));
+check("the rail draws the shared place order",
+  /orderedPlaces\(places, pinsNow\)/.test(src));
+check("the rail reads the same pin rows as the open list",
+  /const pinsNow = pinRows\(spaceList\)/.test(src));
+check("the rail's Ctrl+N is the app's space index, not the rail's",
+  /const appAt = new Map\(spaceList\.map\(\(sp, i\) => \[sp\.id, i\]\)\)/.test(src)
+  && /at != null && at < RAIL_MAX_SPACES \? `Ctrl\+\$\{at \+ 1\}`/.test(src));
+check("the open tree draws the shared place order",
+  /orderedPlaces\(top\.filter\(\(s\) => \(s\.machine \?\? null\) === m\), pinsNow\)/.test(src));
+
+const palette = readFileSync(join(root, "mods/agents-list/palette.js"), "utf8");
+check("the find sheet draws the shared place order",
+  /const rest = orderedPlaces\(all, pinRowList\);/.test(palette));
+check("the find sheet no longer hoists the current space out of its section",
+  !/activeInPins/.test(palette) && !/rootSpace\(active, all\)/.test(palette));
+check("collapse fits the rail before the width changes",
+  /if \(collapsing\) fitRailTo\(px, find\(layout\(\), "sidebar"\)\);[\s\S]{0,120}run\("layout\.resize", \{ id: "sidebar", px \}\);/.test(src));
+check("the width clock still fits a rail dragged narrow",
+  /fitRail\(px\) \{[\s\S]{0,220}fitRailTo\(typeof px === "number"/.test(src));
 
 if (failures) {
   console.error(`\n${failures} rail check(s) failed`);
