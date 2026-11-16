@@ -113,7 +113,7 @@ export default class SidebarHandle extends View {
     // One copy per edge; only the sidebar's own side draws the tab.
     const edge = edgeOf() ?? (left ? "left" : "right");
     if ((edge === "left") !== left) return div().size(0);
-    const back = side.size?.px ?? shared("sidebar.width") ?? 268;
+    const back = side.size?.px ?? shared("sidebar.width") ?? 223;
     return h_flex()
       .id(`handle-${edge}`)
       .w(24)

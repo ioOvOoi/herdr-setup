@@ -8,7 +8,7 @@ the window, and a narrow sidebar folds into a rail of avatars and state marks.
 
 ## What you get
 
-- **A sidebar instead of a tab bar.** `AGENTS` above `TERMINALS` in one 268 px
+- **A sidebar instead of a tab bar.** `AGENTS` above `TERMINALS` in one 223 px
   column, with a footer on the bottom edge. Agents are grouped by what they need
   (Needs you → Done → Working → Idle); the sort button also offers *Grouped by
   space* and *Spaces with agents*. Terminals show their program's mark, tab and
@@ -168,7 +168,7 @@ theme. Any other theme works too: point the layout's `theme` at a name in
 
 ## How it is put together
 
-The root is two columns: a fixed 268 px `sidebar` and the `work` column. Inside
+The root is two columns: a fixed 223 px `sidebar` and the `work` column. Inside
 the sidebar, `agents` and `terminals` share the height by weight over a 32 px
 `sidebar-footer`. The work column shows the active tab as cards, with a hidden
 368 px `files`/`changes` panel. Two `handle` blocks float on the side edges.

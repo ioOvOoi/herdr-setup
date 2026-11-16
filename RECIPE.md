@@ -1,6 +1,6 @@
 # Herdr Setup
 
-A Herdr window with no tab bar and no top bar: one 268 px sidebar holding every
+A Herdr window with no tab bar and no top bar: one 223 px sidebar holding every
 agent and every terminal of the space you are in, a footer you can drag the
 window by, panes drawn as cards, and a single search sheet over it all.
 
@@ -10,7 +10,7 @@ window by, panes drawn as cards, and a single search sheet over it all.
 
 Left to right:
 
-**The sidebar**, 268 px wide, `chrome` background, no divider of its own (the
+**The sidebar**, 223 px wide, `chrome` background, no divider of its own (the
 window edge is its edge), not resizable by its edge — it collapses instead.
 
 - **`AGENTS`** (top, 2.15 weight, min 90 px): a 42 px header (8 px above the
@@ -278,7 +278,7 @@ The layout, `layouts/workspace.json` (a clone of Herdr's `main`, 0.1.14):
 row root                     background canvas · theme {light,dark: omarchy}
                              terminal_padding [14,12] · titlebar none
                              traffic_lights [12,16]
-├─ column sidebar            268 px · min 44 · max 480 · background chrome ·
+├─ column sidebar            223 px · min 44 · max 480 · background chrome ·
 │  │                         resizable false
 │  ├─ column sidebar-lists
 │  │  ├─ block agents        mod agents-list · props {sidebar:true} ·
