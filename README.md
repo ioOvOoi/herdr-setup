@@ -2,7 +2,7 @@
 
 A keyboard-driven [Herdr](https://herdr.dev) layout: one sidebar with every agent
 and terminal, a search sheet, and no tab bar. Panes are cards, the footer drags
-the window, and a narrow sidebar folds into a rail of icons.
+the window, and a narrow sidebar folds into a rail of avatars and state marks.
 
 ![Herdr Setup](preview.png?v=2)
 
@@ -28,8 +28,8 @@ the window, and a narrow sidebar folds into a rail of icons.
   sidebar keeps the keyboard through its dialogs, and a removal is optimistic:
   the checkout leaves the list on the press while git works behind it, and only
   a failure brings it back, with the reason.
-- **A rail when narrow.** Below 160 px the sidebar becomes a column of state
-  dots and icons; past nine spaces an ellipsis expands it again.
+- **A rail when narrow.** Below 160 px the sidebar becomes a column of space
+  avatars and state marks; past nine spaces an ellipsis expands it again.
 - **A searchable keys sheet** — every shortcut in one list, one row per command.
 
 ## Requirements

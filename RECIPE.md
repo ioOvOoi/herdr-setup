@@ -176,13 +176,16 @@ and offers to make one.
   stop the press). `Ctrl+Shift+B` hides the sidebar; the floating tab appears on
   its side and brings it back at the width it had.
 - Narrower than 160 px, the sidebar is a rail. The agents list becomes a column
-  of 26 px numbered cells with tooltips, centred in the rail: an unfold chevron
-  at the top, the space's number and a status dot, and search, shortcuts and
-  settings on the window's bottom edge. Worktrees do not get a numbered cell:
-  they are checkouts under a repo, and the expanded tree and search still hold
-  them. The first nine places get a cell; a tenth turns the rest into one `…`
-  that expands the sidebar. The terminals list
-  and the footer draw
+  of 26 px cells with tooltips, centred in the rail: an unfold chevron at the top,
+  the space's avatar and its state mark, and search, shortcuts and settings on the
+  window's bottom edge. The avatar is the space's first letter in its colour — the
+  way the expanded rows draw it — so a place is recognisable without its name; the
+  current space wears the accent ring. The state mark sits on the avatar's corner:
+  a spinner while working, `!` when something needs you, a filled dot when done and
+  a hollow ring when idle; a space where nothing has reported stays bare. Worktrees
+  do not get a cell: they are checkouts under a repo, and the expanded tree and
+  search still hold them. The first nine places get a cell; a tenth turns the rest
+  into one `…` that expands the sidebar. The terminals list and the footer draw
   nothing at this width, so the agents block puts them away while the rail is
   shown and gives them back when the sidebar widens — only the blocks it hid
   are put back, and the list is remembered, so a restart while collapsed
@@ -451,9 +454,11 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   shows a filled dot and stays in the `Done` group when you look at it.
 - A terminal running `ls` keeps its terminal icon (no purple flash); an agent
   keeps its program's mark.
-- Dragging the sidebar narrower than 160 px leaves the icon rail; widening it
-  brings both lists back. Hiding it (`Ctrl+Shift+B`) floats the edge tab, which
-  restores the earlier width.
+- Dragging the sidebar narrower than 160 px leaves the avatar rail — each cell is
+  the space's first letter in its colour, with its state mark on the corner (a
+  spinner, `!`, a dot or an idle ring), and the current space wears the accent
+  ring; widening it brings both lists back. Hiding it (`Ctrl+Shift+B`) floats the
+  edge tab, which restores the earlier width.
 - Right-clicking the sidebar opens the two-row menu with `Ctrl+Shift+M` and
   `Ctrl+Shift+B` beside the rows; right-clicking a terminal row opens Herdr's
   pane menu aimed at that row's pane.

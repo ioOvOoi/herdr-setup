@@ -139,6 +139,10 @@ function duration(ms) {
   return h < 24 ? `${h}h` : `${Math.floor(h / 24)}d`;
 }
 
+// The letter a space's avatar wears, and the word a state says in a tooltip.
+const initial = (name) => ([...(name ?? "")][0] ?? "?").toUpperCase();
+const STATE = { working: "working", blocked: "needs you", done: "done", idle: "idle" };
+
 // The agent's icon from the app's program table: a one-color glyph or a picture.
 // A tinted glyph keeps the program's own colour: it is the program's mark, not
 // theme text, and it must look the same in every theme.
@@ -1515,7 +1519,24 @@ export class Sidebar extends Workspace {
     }
   }
 
-  // The rail: a column of numbered cells, whatever the list is showing — spaces
+  // The rail's state, at the avatar's corner: a spinner while working, a "!"
+  // when it needs you, a filled dot when done, a hollow ring when idle. The
+  // idle ring is the same quiet mark the rows use; a filled dot for it read as
+  // a disabled control.
+  railMark(t, status) {
+    const corner = () => div().absolute().right(1).bottom(1).flex().items_center().justify_center();
+    if (status === "working") return corner().size(12).rounded_full().bg(t.chrome)
+      .child(svg("mods/workspace-chrome/spinner.svg").size(10).flex_none().text_color(t.accent).spin(900));
+    if (status === "blocked") return corner().size(12).rounded_full().bg(t.chrome)
+      .child(div().size(9).rounded_full().bg(t.blocked).text_size(8).font_bold().text_color(t.chrome)
+        .flex().items_center().justify_center().child("!"));
+    if (status === "done") return corner().size(6).rounded_full().bg(t.done).border(1.5).border_color(t.chrome);
+    if (status === "idle") return corner().size(6).rounded_full().bg(t.chrome)
+      .border(1.5).border_color(t.idle ?? t.dim);
+    return null;
+  }
+
+  // The rail: a column of space avatars, whatever the list is showing — spaces
   // in the spaces view, agents elsewhere — then search, shortcuts and settings.
   rail(t, cells, id, limit = null) {
     const { shown, beyond } = railShown(cells, limit);
@@ -1537,20 +1558,27 @@ export class Sidebar extends Workspace {
       // column is its own box, so the rail's own centring does not reach them.
       .child(v_flex().id(id).flex_1().min_h(0).gap(2).items_center().overflow_y_scrollbar()
         .children([
-          ...shown.map((c) => h_flex()
-            .id(`rail-${c.key}`)
-            .relative()
-            .size(26)
-            .flex_none()
-            .rounded(6)
-            .items_center()
-            .justify_center()
-            .when(c.active, (x) => x.bg(t.selected))
-            .when(!c.active, (x) => x.hover((y) => y.bg(t.hover)))
-            .tooltip(c.tip)
-            .on_click(c.act)
-            .child(div().text_size(10.5).text_color(c.active ? t.foreground : t.muted).child(String(c.n)))
-            .child(div().absolute().right(4).bottom(4).size(5).rounded_full().bg(t[c.status] ?? t.dim))),
+          ...shown.map((c) => {
+            const mark = this.railMark(t, c.status);
+            return h_flex()
+              .id(`rail-${c.key}`)
+              .relative()
+              .size(26)
+              .flex_none()
+              .rounded(6)
+              .items_center()
+              .justify_center()
+              .when(c.active, (x) => x.bg(t.selected))
+              .when(!c.active, (x) => x.hover((y) => y.bg(t.hover)))
+              .tooltip(c.tip)
+              .on_click(c.act)
+              .child(div().size(20).flex_none().rounded(5).bg(c.fill)
+                .flex().items_center().justify_center()
+                .border(1).border_color(c.active ? wash(t.accent, "a0") : wash(t.foreground, "17"))
+                .text_size(9.5).font_semibold().text_color("#ffffff")
+                .child(c.initial))
+              .when(Boolean(mark), (x) => x.child(mark));
+          }),
           ...(beyond > 0 ? [h_flex()
             .id("rail-more")
             .size(26)
@@ -1696,16 +1724,20 @@ export class Sidebar extends Workspace {
     const rest = list.filter((a) => !a.pinned);
     list = [...pinned, ...rest];
     this.publishOrder(list.map((a) => a.address));
-    // Folded, the rail is the numbers only. Building every row and throwing it
+    // Folded, the rail is the avatars only. Building every row and throwing it
     // away was the delay while the sidebar was narrow.
-    if (collapsed) return this.rail(t, list.map((a, i) => ({
-      key: a.address,
-      n: i + 1,
-      tip: a.space_name ? `${a.space_name} \u00b7 ${a.program?.name ?? a.address}` : (a.program?.name ?? a.address),
-      active: a.focused,
-      status: a.status,
-      act: () => this.focusAgent(a),
-    })), "rail-agents");
+    if (collapsed) return this.rail(t, list.map((a) => {
+      const name = a.space_name || a.program?.name || a.address;
+      return {
+        key: a.address,
+        tip: [a.space_name, a.program?.name ?? a.address, STATE[a.status]].filter(Boolean).join(" \u00b7 "),
+        active: a.focused,
+        status: a.status,
+        fill: spaceColor(t, { id: a.space, name: a.space_name }),
+        initial: initial(name),
+        act: () => this.focusAgent(a),
+      };
+    }), "rail-agents");
 
     // Each row comes back with what it stands for, so the keyboard can walk the
     // list in the order it is drawn.
@@ -1998,22 +2030,23 @@ export class Sidebar extends Workspace {
     const rest = list.filter((a) => !a.pinned);
     list = [...pinned, ...rest];
 
-    // Folded, the rail is the spaces' numbers. The tree below is what the open
+    // Folded, the rail is the spaces' avatars. The tree below is what the open
     // sidebar draws; building it here and discarding it was the delay.
     if (collapsed) {
       // A worktree is a checkout under its repo, not another space: counting it
-      // here made the rail show six numbers for five places. The rail lists the
-      // places, numbered 1…n; the checkout stays in the expanded tree and search.
+      // here made the rail show six cells for five places. The rail lists the
+      // places, each with its avatar; the checkout stays in the expanded tree and search.
       // A worktree is a checkout under its repo, never a place of its own; the
       // shared rule knows one even after its shell cds out.
       const places = frameCache("spaces", spaces).filter((sp) => !this.isWorktree(sp)
         && !isRemoving(place(sp, paneList), sp.machine) && !isRemoving(sp.folder, sp.machine));
       return this.rail(t, places.map((sp, i) => ({
         key: sp.id,
-        n: i + 1,
-        tip: sp.name,
+        tip: [this.spaceName(sp), STATE[sp.status], i < RAIL_MAX_SPACES ? `Ctrl+${i + 1}` : null].filter(Boolean).join(" \u00b7 "),
         active: sp.active,
         status: sp.status,
+        fill: spaceColor(t, sp),
+        initial: initial(this.spaceName(sp)),
         act: () => run("space.select", { id: sp.id }),
       })), "rail-spaces", RAIL_MAX_SPACES);
     }
