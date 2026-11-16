@@ -12,6 +12,8 @@
 #      原文件留一份 keys.json.bak.<时间>
 # 不碰 <home> 里的其它东西。
 
+param([switch]$SkipDeps)
+
 $ErrorActionPreference = 'Stop'
 $src = $PSScriptRoot
 $home_ = if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME } else { Join-Path $env:USERPROFILE '.config\herdr-app' }
@@ -62,6 +64,23 @@ if (Test-Path $theme) {
 }
 Copy-Item (Join-Path $src 'themes\omarchy.json') $theme -Force
 Write-Output "主题：    themes/omarchy.json"
+
+# 5. 第三方 mod：布局顶栏的 Git 与 Review 按钮来自它们，缺哪个装哪个
+$deps = @(
+  @{ name = 'Git';        repo = 'https://github.com/kaishin/herdr-git-mod.git';    path = 'mods/Git' },
+  @{ name = 'Codewalker'; repo = 'https://github.com/kaishin/herdr-codewalker.git'; path = 'mods/Codewalker' }
+)
+foreach ($dep in $deps) {
+  if ($SkipDeps) { Write-Output "依赖：    mods/$($dep.name)（-SkipDeps，跳过）"; continue }
+  $depTarget = Join-Path $modsDir $dep.name
+  if (Test-Path $depTarget) { Write-Output "依赖：    mods/$($dep.name)（已存在，跳过）"; continue }
+  $depTmp = Join-Path ([System.IO.Path]::GetTempPath()) "herdr-dep-$($dep.name)-$stamp"
+  if (Test-Path $depTmp) { Remove-Item $depTmp -Recurse -Force }
+  git clone --depth 1 $dep.repo $depTmp 2>&1 | Out-Null
+  Copy-Item (Join-Path $depTmp $dep.path) $depTarget -Recurse -Force
+  Remove-Item $depTmp -Recurse -Force
+  Write-Output "依赖：    mods/$($dep.name)（来自 $($dep.repo)）"
+}
 
 # 4. 合并 keys.json
 $keysPath = Join-Path $home_ 'keys.json'

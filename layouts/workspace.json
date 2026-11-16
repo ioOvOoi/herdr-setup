@@ -66,6 +66,50 @@
       "type": "column",
       "children": [
         {
+          "id": "top-bar",
+          "type": "row",
+          "size": {
+            "px": 30
+          },
+          "background": "chrome",
+          "window_drag": true,
+          "children": [
+            {
+              "id": "git-toolbar",
+              "type": "block",
+              "size": {
+                "weight": 1
+              },
+              "window_drag": true,
+              "content": {
+                "mod": "Git",
+                "props": {
+                  "toolbar": true,
+                  "dock": {
+                    "panel": "panel",
+                    "stack": "panel-body",
+                    "child": "git"
+                  }
+                }
+              }
+            },
+            {
+              "id": "review-toolbar",
+              "type": "block",
+              "size": {
+                "px": 110
+              },
+              "window_drag": true,
+              "content": {
+                "mod": "Codewalker",
+                "props": {
+                  "toolbar": true
+                }
+              }
+            }
+          ]
+        },
+        {
           "id": "work-body",
           "type": "row",
           "children": [
@@ -118,6 +162,27 @@
                       "type": "block",
                       "content": {
                         "mod": "changes"
+                      }
+                    },
+                    {
+                      "id": "git",
+                      "type": "block",
+                      "content": {
+                        "mod": "Git",
+                        "props": {
+                          "dock": {
+                            "panel": "panel",
+                            "stack": "panel-body",
+                            "child": "git"
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "id": "review",
+                      "type": "block",
+                      "content": {
+                        "mod": "Codewalker"
                       }
                     }
                   ],

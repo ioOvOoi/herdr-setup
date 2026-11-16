@@ -29,7 +29,7 @@ function Copy-Back($from, $to) {
     $h2 = (Get-FileHash $to -Algorithm SHA256).Hash
     if ($h1 -eq $h2) { return }
   }
-  $changed += $(if (Test-Path $to) { "modified $to" } else { "new      $to" })
+  $script:changed += $(if (Test-Path $to) { "modified $to" } else { "new      $to" })
   if ($DryRun) { return }
   $dir = Split-Path $to -Parent
   New-Item -ItemType Directory -Force -Path $dir | Out-Null

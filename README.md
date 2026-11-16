@@ -44,6 +44,10 @@ the window, and a narrow sidebar folds into a rail of avatars and state marks.
   Nothing else reaches the network: a remote space's git runs there, and `hc`
   pairs a rebuilt machine only when you press Connect.
 - Optional: the `omarchy` theme (see [Theme](#theme)).
+- The top bar's two buttons come from third-party mods (see
+  [Third-party mods](#third-party-mods)): `Git` needs `git`, and `Codewalker`
+  needs `python3` (3.10+) on `PATH`. Without them the layout still loads; those
+  two blocks just draw nothing.
 
 ## Install
 
@@ -144,6 +148,23 @@ checkout, a subfolder or a non-repo folder; only a different repository root
 re-binds the space. Nested worktrees reorder through that persisted per-repo
 order (`Ctrl+Shift+J`/`K` or a drag), never through `space.move`, which is for
 spaces and is scoped to one machine's block.
+
+## Third-party mods
+
+The layout's top bar draws a `Git` and a `Review` button. Both belong to mods
+by [kaishin](https://github.com/kaishin), not to this repository; `install.ps1`
+clones them (pass `-SkipDeps` to skip), and they are copied in whole rather than
+vendored, so `git pull` upstream, a `herdr-app check`, or deleting them leaves
+this repository untouched.
+
+| Mod | From | What the button opens |
+|---|---|---|
+| `Git` | [kaishin/herdr-git-mod](https://github.com/kaishin/herdr-git-mod) | The side panel in place of Files: branch, commits with a drawn graph, a commit's files, and pull requests. Writes are limited to `git switch`, `git pull --ff-only`, `git push` and `gh pr checkout`; reads run with `--no-optional-locks`. |
+| `Codewalker` | [kaishin/herdr-codewalker](https://github.com/kaishin/herdr-codewalker) | The `review` child of the same panel: a commit's diff with review threads, read and written by a `python3` backend (`mods/Codewalker/backend.py`). It stores reviews under `~/.local/share` and can hand its comments to an agent terminal with `hc send`. |
+
+`Git` shows no commit diff on its own: its "View diff" button needs
+`Codewalker`, and without it the panel says so instead. Both follow the focused
+terminal's folder, so a space on another machine reads that machine's git.
 
 ## Checks
 
