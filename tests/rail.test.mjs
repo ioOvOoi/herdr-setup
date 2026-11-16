@@ -41,9 +41,13 @@ check("no limit leaves the agent rail whole", all.shown.length === 12 && all.bey
 check("the rail lists places, not worktree checkouts",
   /spaceList\.filter\(\(sp\) => !this\.isWorktree\(sp\)/.test(src));
 check("the rail draws the shared place order",
-  /orderedPlaces\(places, pinsNow\)/.test(src));
+  /orderedPlaces\(\[\.\.\.byId\.values\(\)\], \[\]\)/.test(src)
+  && /for \(const \{ p, s \} of pinsNow\) \{/.test(src));
 check("the rail reads the same pin rows as the open list",
-  /const pinsNow = pinRows\(spaceList\)/.test(src));
+  /const pinsNow = this\.shownPins\(spaceList, paneList\)/.test(src));
+check("a pin whose space has exited keeps its rail cell",
+  /else if \(!s\) cells\.push\(this\.pinCell\(t, p\)\)/.test(src)
+  && /pinCell\(t, p\) \{/.test(src));
 check("the rail's Ctrl+N is the app's space index, not the rail's",
   /const appAt = new Map\(spaceList\.map\(\(sp, i\) => \[sp\.id, i\]\)\)/.test(src)
   && /at != null && at < RAIL_MAX_SPACES \? `Ctrl\+\$\{at \+ 1\}`/.test(src));

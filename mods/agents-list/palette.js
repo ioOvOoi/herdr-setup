@@ -6,7 +6,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { spaces, agents, panes, run, closeOverlay, props, theme, settings, shared, setShared } from "herdr";
 import {
   Workspace, MARK, wash, tileOf, inkOf, marks, keycap, shortcutOf, place,
-  pinnedList, pinRows, pinnedRepo, isRemoving, removingList, folderColor, pinLabel, norm, base,
+  pinnedList, pinnedRepo, isRemoving, removingList, folderColor, pinLabel, norm, base,
   tidyPath, spaceColor, worktreeTree, RANK, askGit, listedCheckouts, pictureKey,
   beginPaint, endPaint, frameCache, scoreTerms, termsOf, spaceRecord,
   groupKeyOf, orderedPaths, orderedPlaces, movePathWithin, machineIndexOf, persistWorkspace,
@@ -313,7 +313,7 @@ export class Palette extends Workspace {
     // the slot it was pinned in: a place whose space is gone keeps its line, as
     // it does in the sidebar, and the space a click opens there takes it back.
     const heldPins = new Set();
-    const pinRowList = pinRows(all)
+    const pinRowList = this.shownPins(all, ps)
       .filter(({ s }) => {
         if (!s) return true;
         if (heldPins.has(s.id)) return false;
@@ -454,7 +454,7 @@ export class Palette extends Workspace {
       ids: (list = spaces()) => {
         const mine = list.filter((x) => (x.machine ?? null) === (s.machine ?? null) && !this.isWorktree(x));
         const held = new Set(mine.map((x) => x.id));
-        const pinned = pinRows(list)
+        const pinned = this.shownPins(list)
           .filter(({ p, s: hit }) => (p.machine ?? null) === (s.machine ?? null) && hit && held.has(hit.id))
           .map(({ s: hit }) => hit.id);
         const seen = new Set(pinned);
@@ -518,16 +518,22 @@ export class Palette extends Workspace {
 
   // What the sheet lists. A checkout the worktrees dialog has already taken away
   // is not a row any more, even while git is still working on it: it was asked
-  // for, so it must not read as still there.
+  // for, so it must not read as still there. A worktree git no longer lists is
+  // gone the same way, pinned or not.
   liveSpaces(ps = panes()) {
     // A checkout on its way out hides its space wherever that space's shell is:
     // the live place first, and the folder it was made in too. One pane snapshot
     // for the whole list: `place` copies it out of the host on every call.
     // One list per snapshot: the overview, the search and the header all read it.
-    if (this._live && this._livePs === ps) return this._live;
-    const list = frameCache("spaces", spaces).filter((s) => !isRemoving(place(s, ps), s.machine) && !isRemoving(s.folder, s.machine));
+    // The short clock lets the sidebar's next scan reach a list already drawn.
+    if (this._live && this._livePs === ps && Date.now() - (this._liveAt ?? 0) < 500) return this._live;
+    const raw = frameCache("spaces", spaces);
+    this.removedNow = this.removedWorktrees(raw, ps);
+    const list = raw.filter((s) => !this.removedNow.has(s.id)
+      && !isRemoving(place(s, ps), s.machine) && !isRemoving(s.folder, s.machine));
     this._live = list;
     this._livePs = ps;
+    this._liveAt = Date.now();
     return list;
   }
 

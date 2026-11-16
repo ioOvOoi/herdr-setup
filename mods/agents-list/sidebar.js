@@ -6,7 +6,7 @@ import { v_flex, h_flex, ScrollHandle } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, machines, run, exec, hc, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, watchFolder, notify, nextCommand } from "herdr";
 import {
   Workspace, wash, place, norm, tidyPath, base, inWorktrees, isRemoving, removingList,
-  pinRows, pinnedList, pinnedRepo, checkouts, dropGitCache, worktreeTree, spaceColor, RANK, MARK,
+  pinnedList, pinnedRepo, isPinned, checkouts, dropGitCache, worktreeTree, spaceColor, RANK, MARK,
   pinLabel, folderColor,
   onGitRefresh, takeGitAsk, touchWorkspace, listedCheckouts, pictureKey,
   beginPaint, endPaint, frameCache, spaceRecord, pinSpace, persistWorkspace,
@@ -361,6 +361,10 @@ export class Sidebar extends Workspace {
     });
     this.refreshGit(cx, true);
     cx.timer.every(8000, (cx) => this.refreshGit(cx));
+    // A removed checkout is hidden by the picture at once; this takes the empty
+    // space away too, after the same few seconds a deleted folder gets.
+    this.goneAt = new Map();
+    cx.timer.every(4000, (cx) => this.sweepRemoved(cx));
     // The rail owns the whole sidebar while collapsed, and gives it back when
     // the sidebar is dragged wider.
     this.fitRail();
@@ -660,6 +664,23 @@ export class Sidebar extends Workspace {
       seen.add(key);
       jobs.push({ machine: p.machine ?? null, folder: p.folder, key });
     }
+    // A sticky worktree record keeps its repo's checkout list alive even when no
+    // space stands in the main checkout: reading the main folder is what keeps
+    // that list fresh, and a fresh list without the checkout is how a removed
+    // worktree is known (and stays known while its space is still open).
+    const stickyRepos = new Set();
+    for (const rec of Object.values(this.spacePins ?? {})) {
+      if (!rec?.isWorktree || !rec.groupKey) continue;
+      stickyRepos.add(rec.groupKey);
+      const at = rec.groupKey.indexOf(SEP);
+      const on = rec.groupKey.slice(0, at) || null;
+      const main = rec.groupKey.slice(at + 1);
+      if (!main) continue;
+      const key = `${on}${SEP}${tidyPath(main)}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      jobs.push({ machine: on, folder: main, key });
+    }
     let changed = false;
     let cursor = 0;
     const worker = async () => {
@@ -686,6 +707,7 @@ export class Sidebar extends Workspace {
       const repo = pinnedRepo(p, this.git);
       if (repo) repos.add(repo);
     }
+    for (const repo of stickyRepos) repos.add(repo);
     for (const key of Object.keys(this.trees ?? {})) {
       if (repos.has(key)) continue;
       delete this.trees[key];
@@ -722,6 +744,28 @@ export class Sidebar extends Workspace {
     // Always offer the picture to shared state; the writer is a no-op unless
     // something changed (or a stale key needs dropping).
     persistWorkspace(true);
+  }
+
+  // A worktree checkout git no longer lists must not leave its space behind.
+  // The picture hides it everywhere at once; this only ends an unpinned space
+  // after a grace, the way a deleted folder is ended. A pinned space is never
+  // closed: it keeps running, hidden, and comes back if the checkout does.
+  sweepRemoved(cx) {
+    const rows = frameCache("spaces", spaces);
+    const removed = this.removedWorktrees(rows, frameCache("panes", panes));
+    const seen = this.goneAt ?? (this.goneAt = new Map());
+    const now = Date.now();
+    for (const id of [...seen.keys()]) if (!removed.has(id)) seen.delete(id);
+    let closed = false;
+    for (const s of rows) {
+      if (!removed.has(s.id)) continue;
+      if (!seen.has(s.id)) { seen.set(s.id, now); continue; }
+      if (now - seen.get(s.id) < 6000 || isPinned(s)) continue;
+      seen.delete(s.id);
+      closed = true;
+      run("space.close", { id: s.id, confirmed: true });
+    }
+    if (closed) cx.notify();
   }
 
   async probeGit(cx, job, force) {
@@ -1659,6 +1703,24 @@ export class Sidebar extends Workspace {
       .child(div().h(8).flex_none());
   }
 
+  // The rail's cell for a pin whose space has exited. It wears the colour and
+  // initial the open tree's pin row wears, and opens a shell in the place, so
+  // collapsing the sidebar loses neither the row nor what it stands for.
+  pinCell(t, p) {
+    const tone = p.color ?? folderColor(p.folder);
+    const color = tone.startsWith("#") ? tone : (MARK[tone] ?? t[tone] ?? t.dim);
+    const name = pinLabel(p);
+    return {
+      key: `pin-${p.machine ?? ""}-${norm(p.folder)}`,
+      tip: `${p.folder} \u00b7 click to open a shell there`,
+      active: false,
+      status: null,
+      fill: color,
+      initial: initial(name),
+      act: () => this.openRow({ kind: "pin", pin: { ...p } }),
+    };
+  }
+
   // A header control: 26px, quiet until hovered, tinted while it holds a view.
   iconButton(t, id, icon, tip, action, size = 14, active = false) {
     return div().id(id).size(26).flex_none().rounded(7).flex().items_center().justify_center()
@@ -1756,7 +1818,8 @@ export class Sidebar extends Workspace {
     const collapsed = narrow();
     const sort = sortOf();
     const byPriority = sort.id === "priority";
-    let list = agents();
+    // A removed worktree's agents go with its row: the view is the same picture.
+    let list = agents().filter((a) => !this.removedNow?.has(a.space));
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     const treeMemo = new Map();
@@ -2012,8 +2075,15 @@ export class Sidebar extends Workspace {
     // space's shell never reshuffles Pinned. The rail and the expanded tree read
     // the same two lists, so collapsing changes the drawing and nothing else.
     const spaceList = frameCache("spaces", spaces);
+    // One pane snapshot for this frame. `place` copies the whole list per call.
+    const paneList = frameCache("panes", panes);
+    this.paneSnap = paneList;
     this.bindPins(spaceList);
-    const pinsNow = pinRows(spaceList);
+    // A worktree whose checkout is gone is not a place to show, pinned or not:
+    // its rows, its agents and its pin all go, in every view and in the sheet.
+    const removed = this.removedWorktrees(spaceList, paneList);
+    this.removedNow = removed;
+    const pinsNow = this.shownPins(spaceList, paneList);
     // One layout read for the width, the rail and the header. `layout()` copies
     // the whole tree, and this frame used to ask for it twice.
     const sort = sortOf();
@@ -2027,12 +2097,9 @@ export class Sidebar extends Workspace {
     // Search, sort and hide live in the header; the count gives way first when
     // the sidebar is narrow.
     const roomy = sidePx >= 210;
-    // One pane snapshot for this frame. `place` copies the whole list per call.
-    const paneList = frameCache("panes", panes);
-    this.paneSnap = paneList;
     // A checkout on its way out takes its agents with it, before git has finished.
-    const leaving = new Set(frameCache("spaces", spaces).filter((s) => isRemoving(place(s, paneList) ?? s.folder, s.machine)).map((s) => s.id));
-    let list = agents().filter((a) => !leaving.has(a.space));
+    const leaving = new Set(spaceList.filter((s) => isRemoving(place(s, paneList) ?? s.folder, s.machine)).map((s) => s.id));
+    let list = agents().filter((a) => !leaving.has(a.space) && !removed.has(a.space));
     this.listed = new Map(list.map((a) => [a.address, a.status]));
     const all = terminals();
     const treeMemo = new Map();
@@ -2098,18 +2165,21 @@ export class Sidebar extends Workspace {
       // places, each with its avatar; the checkout stays in the expanded tree and search.
       // A worktree is a checkout under its repo, never a place of its own; the
       // shared rule knows one even after its shell cds out.
-      const places = spaceList.filter((sp) => !this.isWorktree(sp)
+      const places = spaceList.filter((sp) => !this.isWorktree(sp) && !removed.has(sp.id)
         && !isRemoving(place(sp, paneList), sp.machine) && !isRemoving(sp.folder, sp.machine));
       // The same places, in the same order both lists draw: pinned slots first,
       // then needs you, done, working, idle. Collapsing the sidebar must not
       // reshuffle the avatars, and a status tick must move a cell only when it
       // moves the row.
-      const placed = orderedPlaces(places, pinsNow);
+      // A pin whose space has exited keeps its slot here too. The open tree
+      // draws that row from the pin alone; reading only the live spaces made the
+      // cell vanish with the shell — the one thing a pin is for.
+      const byId = new Map(places.map((sp) => [sp.id, sp]));
       // Ctrl+1…Ctrl+9 select by the app's own space index, not the rail's: after
       // grouping, the nth cell is not the nth space. Only a cell whose key really
       // selects it names that key.
       const appAt = new Map(spaceList.map((sp, i) => [sp.id, i]));
-      return this.rail(t, placed.map((sp) => {
+      const cell = (sp) => {
         const at = appAt.get(sp.id);
         return {
           key: sp.id,
@@ -2120,7 +2190,16 @@ export class Sidebar extends Workspace {
           initial: initial(this.spaceName(sp)),
           act: () => run("space.select", { id: sp.id }),
         };
-      }), "rail-spaces", RAIL_MAX_SPACES);
+      };
+      const cells = [];
+      for (const { p, s } of pinsNow) {
+        const sp = s ? byId.get(s.id) : null;
+        if (sp) { byId.delete(sp.id); cells.push(cell(sp)); }
+        // A live worktree is not a place: it stays under its repo in the tree.
+        else if (!s) cells.push(this.pinCell(t, p));
+      }
+      for (const sp of orderedPlaces([...byId.values()], [])) cells.push(cell(sp));
+      return this.rail(t, cells, "rail-spaces", RAIL_MAX_SPACES);
     }
 
     // Each row comes back with the thing it stands for, so the keyboard can walk
@@ -2254,7 +2333,8 @@ export class Sidebar extends Workspace {
       // reorder, right-click menu) with the find sheet's tree under them: a section
       // per space urgency, every space listed, worktrees under their checkout,
       // and each space's agents one level in.
-      const allSpaces = frameCache("spaces", spaces).filter((s) => !isRemoving(place(s, paneList), s.machine) && !isRemoving(s.folder, s.machine));
+      const allSpaces = spaceList.filter((s) => !removed.has(s.id)
+        && !isRemoving(place(s, paneList), s.machine) && !isRemoving(s.folder, s.machine));
       const pinOf = (s) => this.spacePin(s);
       const kidsOf = new Map();
       for (const a of list) kidsOf.set(a.space, [...(kidsOf.get(a.space) ?? []), a]);

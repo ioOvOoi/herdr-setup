@@ -1123,6 +1123,57 @@ export class Workspace extends View {
     return made ?? null;
   }
 
+  // A worktree space whose checkout is gone. The sticky record still says
+  // worktree, but the repo's checkout list (a successful read, made after this
+  // process started) no longer holds its path: git has removed the checkout, so
+  // the branch it was for is gone. The stale git summary for the deleted folder
+  // says nothing either way — a failed read keeps it on purpose — which is why
+  // the checkout list decides. A pin never keeps the row: a removed checkout is
+  // not a place to show, pinned or not.
+  removedWorktree(s) {
+    const rec = spaceRecord(s);
+    if (!rec?.isWorktree || !rec.worktreePath) return false;
+    const groupKey = rec.groupKey;
+    if (!groupKey || !(groupKey in (this.trees ?? {}))) return false;
+    // Only a this-session read can call a path gone. A hydrated list is as old
+    // as the last start, and a failed read leaves the old list and no `treesAt`.
+    if (!(this.treesAt?.[groupKey] > 0)) return false;
+    const list = this.trees[groupKey];
+    if (!Array.isArray(list)) return false;
+    const root = tidyPath(rec.worktreePath);
+    return !list.some((c) => tidyPath(c.path) === root);
+  }
+
+  // The ids of every live worktree space whose checkout has gone.
+  removedWorktrees(all = spaces(), ps = null) {
+    const out = new Set();
+    for (const s of all) if (this.removedWorktree(s, ps)) out.add(s.id);
+    return out;
+  }
+
+  // The checkout paths those spaces were made in, for a pin that outlives its
+  // space: a removed worktree's pin row goes with the row.
+  removedWorktreeRoots(all = spaces(), ps = null) {
+    const out = new Set();
+    for (const s of all) {
+      const rec = spaceRecord(s);
+      if (rec?.isWorktree && this.removedWorktree(s, ps)) out.add(tidyPath(rec.worktreePath));
+    }
+    return out;
+  }
+
+  // The pins to draw, minus a pin whose checkout was removed. `all` may already
+  // have the removed spaces filtered out (the sheet's list); the sockets are
+  // read from the raw spaces, so a pin keeps no line for a checkout that is gone.
+  shownPins(all = spaces(), ps = null) {
+    const raw = frameCache("spaces", spaces);
+    const removed = this.removedWorktrees(raw, ps);
+    const roots = this.removedWorktreeRoots(raw, ps);
+    return pinRows(all).filter(({ p, s }) => !(s && removed.has(s.id))
+      && !(p?.id && removed.has(p.id))
+      && !roots.has(tidyPath(p?.folder ?? "")));
+  }
+
   // The checkout a space stands in. The sticky record wins over every path
   // heuristic: it is what keeps a worktree a worktree after its shell `cd`s
   // out of it. The in-memory git answer is the fallback for the first frame, and

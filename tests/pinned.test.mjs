@@ -142,7 +142,7 @@ check("a second removal is queued instead of overwriting the first",
 check("a failed removal leaves the spaces alone",
   /"worktree", "remove"[\s\S]{0,500}if \(!error\) \{[\s\S]{0,90}if \(!windows\) closeSpaces\(\)/.test(sidebar));
 check("a checkout on its way out leaves the list before git finishes",
-  /frameCache\("spaces", spaces\)\.filter\(\(s\) => !isRemoving\(place\(s, paneList\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)\)/.test(sidebar)
+  /const allSpaces = spaceList\.filter\(\(s\) => !removed\.has\(s\.id\)\s*&& !isRemoving\(place\(s, paneList\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)\)/.test(sidebar)
   && /forest\.checkoutParents\.get[\s\S]{0,120}isRemoving\(c\.path, c\.on\)/.test(sidebar)
   && /liveSpaces\(ps = panes\(\)\) \{[\s\S]{0,900}!isRemoving\(place\(s, ps\), s\.machine\) && !isRemoving\(s\.folder, s\.machine\)/.test(palette));
 check("the space menu does not offer closing a pinned space",
