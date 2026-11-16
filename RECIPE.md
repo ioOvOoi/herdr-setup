@@ -37,6 +37,9 @@ window edge is its edge), not resizable by its edge — it collapses instead.
 tab as cards — 10 px radius, 1 px `border` (1 px `accent` while the pane has the
 keyboard), `background` fill, 8 px between panes, framed even when the tab has a
 single pane. Terminal text sits 14 px from the top and 12 px from the side.
+Every pane also carries an invisible `hoverfocus` header, 5000 px tall and
+revealed only on hover; it draws nothing and runs `pane.focus`, so moving the
+pointer onto a terminal focuses it.
 
 **No floating tabs.** Narrow, the sidebar is the rail; `Ctrl+Shift+B` folds it
 there and unfolds it at the width it had. There is no hidden state to rescue.
@@ -192,6 +195,12 @@ and offers to make one.
   restores them too. From 160 to 210 px the labels and the machine name drop
   out, the lists stay.
 
+**In the panes**
+
+- Move the pointer onto a terminal: it takes the keyboard (`pane.focus`), no
+  click. The `hoverfocus` header stays transparent, so the pane looks the same;
+  the sidebar's agent and terminal rows remain click-only.
+
 **Keys this layout adds** (see the install table in `README.md`)
 
 - `Alt+F` the search sheet; `Ctrl+Shift+X` closes the focused pane, `Ctrl+Shift+W`
@@ -288,7 +297,8 @@ row root                     background canvas · theme {light,dark: omarchy}
 └─ column work               resizable false
    └─ row work-body          padding 8 · gap 8
       ├─ block main          tab active · pane {radius 10, gap 8, border 1,
-      │                      focus accent, background, lone true}
+      │                      focus accent, background, lone true,
+      │                      header hoverfocus 5000 hover}
       └─ column panel        368 px · min 280 · max 900 · hidden
          └─ stack panel-body active files
             ├─ block files   mod files (Herdr's)
@@ -307,6 +317,7 @@ Mods, all `"place": "none"` (the layout decides where they draw):
 | `worktrees` | `{space?, folder?, machine?, action}` or `{agent}` | Dialogs: new, open, remove worktree; remove a space; stop an agent. Runs `git worktree list/add/remove` with `exec`, `spaces()`, `space.new/close`, `terminal.kill`; finds `$HOME` with `sh -c 'printf %s "$HOME"'` (PowerShell on Windows). |
 | `sidebar-menu` | overlay | The sidebar's right-click menu. `layout()`, `layout.set` (flip), `layout.resize` (collapse/expand), `keys()` for the hints. |
 | `pane-header` | — | Optional pane header (program, folder, working/needs-you/done, split, zoom, close). Not used by this layout. |
+| `hoverfocus` | — | The transparent pane header this layout uses: on pointer entry it runs `pane.focus` for its `props().pane` when the window is active, so terminals follow the mouse. Renders nothing for mod panes. |
 
 The keys are the repository's `keys.json`: `install.sh` updates its
 `layout:workspace` section in the person's file and adds its `global` and
@@ -460,7 +471,7 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   pane menu aimed at that row's pane.
 - The keyboard icon in the footer opens the keys sheet, where typing `search`
   finds the search binding and `Esc` closes it.
-- `herdr-app check mods/<each>` passes for all eight mods, and `herdr-app status`
+- `herdr-app check mods/<each>` passes for all nine mods, and `herdr-app status`
   reports no errors.
 - The ten test files pass: `node tests/*.test.mjs`. They cut functions out of
   the mods and run them with stubs, so they fail when the code changes rather

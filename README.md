@@ -21,6 +21,9 @@ the window, and a narrow sidebar folds into a rail of avatars and state marks.
   shortcut sheet and settings on the right; the strip itself drags the window.
 - **Panes as cards** — 10 px radius, 8 px between them, an accent border on the
   focused pane, and no header eating space.
+- **Focus follows the pointer.** Moving the mouse onto a terminal focuses that
+  pane, the way Hyprland focuses a window — no click. It works with the sidebar
+  open or collapsed; the sidebar's own lists stay click-only.
 - **Worktrees from the sidebar.** New, open and remove in dialogs. A pinned
   place keeps its line: no dialog closes it, its shell exiting leaves the row
   where it was with its checkouts under it, and opening it again comes back
@@ -51,14 +54,14 @@ cd herdr-setup
 herdr-app do layout.switch --name workspace
 ```
 
-`install.sh` copies the layout, its eight mods and its theme into
+`install.sh` copies the layout, its nine mods and its theme into
 `~/.config/herdr-app`, then merges this layout's keys into `keys.json`: its
 section is updated, and the bundle's `global` and `terminal` bindings are added
 only where yours has none (the old file is kept as `keys.json.bak.<time>`). It
 touches nothing else. Set `HERDR_APP_HOME` to install elsewhere.
 
 To install by hand, copy `layouts/workspace.json` and `layouts/workspace.svg`
-into `layouts/`, the eight mod folders listed below into `mods/`, and
+into `layouts/`, the nine mod folders listed below into `mods/`, and
 `themes/omarchy.json` into `themes/`, then merge the `layout:workspace` section
 of this repository's `keys.json` into yours (and any `global`/`terminal` keys
 your file is missing).
@@ -110,7 +113,7 @@ socket) out of it.
 
 ## Mods
 
-The layout ships eight mods as parts of itself, not separate downloads:
+The layout ships nine mods as parts of itself, not separate downloads:
 
 | Mod | What it is |
 |---|---|
@@ -122,6 +125,7 @@ The layout ships eight mods as parts of itself, not separate downloads:
 | `worktrees` | New / open / remove worktree dialogs and stop confirmations. |
 | `sidebar-menu` | Right-click the sidebar: move it to the other side, or collapse it. |
 | `pane-header` | An optional pane header. **Unused by this layout.** |
+| `hoverfocus` | Focuses a terminal when the pointer enters it. The layout installs it as every pane's header; it draws nothing and skips mod panes. |
 
 Each folder is self-contained and can be copied into another Herdr home. The
 sidebar and its `Alt+F` find sheet are one mod (`agents-list`): Herdr only lets a
@@ -172,8 +176,9 @@ theme. Any other theme works too: point the layout's `theme` at a name in
 The root is two columns: a fixed 223 px `sidebar` and the `work` column. Inside
 the sidebar, `agents` and `terminals` share the height by weight over a 32 px
 `sidebar-footer`. The work column shows the active tab as cards, with a hidden
-368 px `files`/`changes` panel. The sidebar has no hidden state: narrow, it is
-the rail; `Ctrl+Shift+B` folds it there.
+368 px `files`/`changes` panel. Every pane carries an invisible `hoverfocus`
+header, so moving the pointer onto a terminal focuses it. The sidebar has no
+hidden state: narrow, it is the rail; `Ctrl+Shift+B` folds it there.
 
 The ids matter: mods find their places by id (`sidebar`, `agents`, `terminals`,
 `sidebar-footer`, `main`, `panel`, `panel-body`, `work-body`), so renaming a node

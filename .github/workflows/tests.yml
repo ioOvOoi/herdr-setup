@@ -28,6 +28,7 @@ jobs:
           HERDR_APP_HOME=/tmp/herdr-home ./install.sh
           test -f /tmp/herdr-home/layouts/workspace.json
           test -d /tmp/herdr-home/mods/agents-list
+          test -d /tmp/herdr-home/mods/hoverfocus
           test ! -e /tmp/herdr-home/mods/search
           python3 - <<'PY'
           import json

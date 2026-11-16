@@ -86,7 +86,15 @@
                   },
                   "radius": 10,
                   "gap": 8,
-                  "lone": true
+                  "lone": true,
+                  "header": {
+                    "content": {
+                      "mod": "hoverfocus"
+                    },
+                    "height": 5000,
+                    "position": "top",
+                    "reveal": "hover"
+                  }
                 }
               }
             },
