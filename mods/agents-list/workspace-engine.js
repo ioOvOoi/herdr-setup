@@ -1608,8 +1608,8 @@ export class Workspace extends View {
     return this.pathNow;
   }
 
-  // Ctrl+J/K are the app's keys (the handle's dir commands), so a view with the
-  // keyboard cannot see them. The handle hands the walk over through a shared
+  // Ctrl+J/K are the app's keys (the sidebar's dir commands), so a view with the
+  // keyboard cannot see them. The sidebar hands the walk over through a shared
   // value. That write already repaints this view: the highlight moves in that
   // paint. A timer used to notice the write up to 70ms later, and dropped
   // repeats that landed in the same gap.
@@ -1621,7 +1621,7 @@ export class Workspace extends View {
     this.walkChannel = channel;
     // A count left from the last session is not a jump waiting to happen.
     if (this.walkMark == null) this.walkMark = shared(channel) ?? "";
-    // The hand-off is a shared write from the `handle` mod. A copy of a mod is
+    // The hand-off is a shared write from the sidebar. A copy of a mod is
     // its own view: another copy's write does not repaint this one, so without
     // this the key moved nothing until some unrelated timer happened to paint.
     // Poll the one small string; ask for a paint only when it changed, and the
@@ -1653,7 +1653,7 @@ export class Workspace extends View {
     // The poll below must not repaint for a step this paint already consumed.
     this.walkSeen = m;
     let count = next.n - prev.n;
-    // The handle's counter starts at zero each launch, so the first step after
+    // The sidebar's counter starts at zero each launch, so the first step after
     // a restart is a lower number, not a leap back through the old count.
     if (count <= 0 || count > 40) count = 1;
     return next.dir === "up" ? -count : count;

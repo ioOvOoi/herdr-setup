@@ -28,20 +28,6 @@ const isPinned = (s) => Boolean(s?.id) && pinnedList().some((p) => (p.id
 
 const activeSpace = () => spaces().find((s) => s.active) ?? null;
 
-// Hide the sidebar whole, or bring it back at the width it had.
-function toggleSidebar() {
-  const side = find(layout(), "sidebar");
-  if (!side) return;
-  const width = side.size?.px;
-  if (!side.hidden && width && width >= (side.min ?? 0)) setShared("sidebar.width", width);
-  setShared("sidebar.collapsed", !side.hidden);
-  run("layout.toggle", { id: "sidebar" });
-  if (side.hidden) {
-    const back = shared("sidebar.width");
-    if (back) run("layout.resize", { id: "sidebar", px: back });
-  }
-}
-
 // Swap the sidebar with the work column, and the panel with the terminal pane.
 function flipLayout() {
   const tree = JSON.parse(JSON.stringify(layout() ?? {}));
@@ -169,7 +155,7 @@ export default class Status extends View {
           .flex().items_center().justify_center()
           .child(svg(`mods/icons/${space?.machine ? "server" : "monitor"}.svg`).size(11.5).flex_none().text_color(t.muted)))
         .when(!compact, (el) => el.child(div().min_w(0).truncate().text_size(11.5).child(space?.machine ?? "This computer")))))
-      // Search and hide the sidebar moved to the agents header; settings stays,
+      // Search and collapse the sidebar moved to the agents header; settings stays,
       // so the rail keeps one control of its own.
       .child(h_flex().flex_none().gap(2).items_center()
         .child(this.button("footer-keys", "mods/icons/keyboard.svg", () => run("mod.open", { name: "shortcuts" }), "Keyboard shortcuts"))

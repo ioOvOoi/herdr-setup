@@ -56,7 +56,6 @@ themselves, only while they hold the keyboard, so they never shadow a terminal.
 | Key | Action |
 | --- | --- |
 | `ctrl-shift-l` | Show the next layout |
-| `ctrl-shift-b` | Hide or show the sidebar |
 | `ctrl-shift-p` | The command palette |
 | `alt-f` | Find: spaces, agents, worktrees and branches |
 | `ctrl-?` / `ctrl-shift-/` / `ctrl-shift-?` | The keys sheet |
@@ -71,6 +70,7 @@ themselves, only while they hold the keyboard, so they never shadow a terminal.
 | Key | Action |
 | --- | --- |
 | `ctrl-j` / `ctrl-k` | Move to the pane below or above — or walk the find sheet or the sidebar while it has the keyboard |
+| `ctrl-shift-b` | Collapse the sidebar to the rail, or expand it again |
 | `ctrl-shift-m` | Move the sidebar to the other side |
 | `ctrl-shift-d` | Make a worktree in the active space's repo |
 | `alt-b` | Put the keyboard in the sidebar, and back |
@@ -192,7 +192,6 @@ your other sections and merges this layout's. The three sections are `global`,
     "ctrl-?": "app.help",
     "ctrl-shift-/": "app.help",
     "ctrl-shift-?": "app.help",
-    "ctrl-shift-b": "layout.toggle:sidebar",
     "ctrl-shift-n": "space.new",
     "ctrl-shift-t": "tab.new",
     "alt-f": "mod.open:agents-list",
@@ -240,12 +239,13 @@ your other sections and merges this layout's. The three sections are `global`,
     "alt-enter": "pane.split:down",
     "alt-shift-enter": "pane.split:right",
     "alt-escape": "pane.close",
-    "ctrl-j": "handle.dir_down",
-    "ctrl-k": "handle.dir_up",
-    "ctrl-shift-x": "handle.close_pane",
-    "ctrl-shift-w": "handle.close_tab",
-    "ctrl-shift-m": "handle.flip_layout",
-    "ctrl-shift-d": "handle.worktree_new",
+    "ctrl-j": "agents-list.dir_down",
+    "ctrl-k": "agents-list.dir_up",
+    "ctrl-shift-x": "agents-list.close_pane",
+    "ctrl-shift-w": "agents-list.close_tab",
+    "ctrl-shift-m": "agents-list.flip_layout",
+    "ctrl-shift-d": "agents-list.worktree_new",
+    "ctrl-shift-b": "agents-list.toggle_sidebar",
     "alt-b": "agents-list.focus_sidebar",
     "alt-shift-n": "agents-list.new_space",
     "alt-shift-q": "agents-list.close_space",

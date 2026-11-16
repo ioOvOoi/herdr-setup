@@ -11,7 +11,7 @@
 //
 //   node tests/keys.test.mjs
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -21,8 +21,8 @@ const core = read("mods/agents-list/workspace-engine.js");
 const palette = read("mods/agents-list/palette.js");
 const side = read("mods/agents-list/sidebar.js");
 const foot = read("mods/footer/main.js");
-const host = read("mods/handle/main.js");
 const sheet = read("mods/shortcuts/main.js");
+const bindings = JSON.parse(read("keys.json"));
 
 let failures = 0;
 const check = (label, ok, extra = "") => {
@@ -70,18 +70,26 @@ check("the sidebar reads the shared map before the modifier return",
   sideChord > 0 && sideReturn > 0 && sideChord < sideReturn,
   "the chords would fall through to the app");
 
-// Ctrl+J/K are bound to the handle's dir commands. The footer and the terminals
-// list are hidden with the sidebar and again on the rail, so they never see the
-// key then. The left handle stays shown and hands the walk back. The footer
-// keeps the same hand-off for a key someone rebound onto it.
-check("the handle gives Ctrl+J/K to the sidebar while it has the keyboard",
-  /else if \(shared\("sidebar\.kb"\)\) setShared\("sidebar\.move"/.test(host));
-check("only the left handle listens, so the two copies do not both step",
-  /edge !== "left"/.test(host) && /nextCommand\(/.test(host) && /tries < 20/.test(host));
-check("the layout points the walk, the flip and the closes at the handle",
-  JSON.parse(read("keys.json"))["layout:workspace"]["ctrl-j"] === "handle.dir_down"
-  && JSON.parse(read("keys.json"))["layout:workspace"]["ctrl-shift-m"] === "handle.flip_layout"
-  && JSON.parse(read("keys.json"))["layout:workspace"]["ctrl-shift-x"] === "handle.close_pane");
+// Ctrl+J/K, the flip, the closes and Ctrl+Shift+B are the sidebar's commands:
+// the sidebar is mounted on the rail too, while the footer and the terminals
+// list are put away there. The footer keeps the same hand-off for a key someone
+// rebound onto it. There is no edge tab to rescue a hidden sidebar any more:
+// Ctrl+Shift+B collapses it instead.
+check("the sidebar gives Ctrl+J/K to itself while it has the keyboard",
+  /if \(shared\("sidebar\.kb"\)\) return setShared\("sidebar\.move"/.test(side));
+check("the sidebar handles the layout keys and the collapse",
+  /if \(c === "flip_layout"\) return flipLayout\(\)/.test(side)
+  && /if \(c === "close_pane" \|\| c === "close_tab"\) return closeFocused\(c\)/.test(side)
+  && /if \(c === "toggle_sidebar"\) return toggleSidebar\(\)/.test(side));
+check("the layout points the walk, the flip, the closes and the collapse at the sidebar",
+  bindings["layout:workspace"]["ctrl-j"] === "agents-list.dir_down"
+  && bindings["layout:workspace"]["ctrl-shift-m"] === "agents-list.flip_layout"
+  && bindings["layout:workspace"]["ctrl-shift-x"] === "agents-list.close_pane"
+  && bindings["layout:workspace"]["ctrl-shift-b"] === "agents-list.toggle_sidebar");
+check("Ctrl+Shift+B no longer hides the sidebar",
+  bindings.global?.["ctrl-shift-b"] === undefined
+  && !/layout\.toggle:sidebar/.test(read("keys.json"))
+  && !existsSync(join(root, "mods", "handle", "main.js")));
 check("the footer still hands a rebound Ctrl+J/K to the sidebar",
   /else if \(shared\("sidebar\.kb"\)\) setShared\("sidebar\.move"/.test(foot));
 check("the keys sheet drops a global binding a layout section replaces",

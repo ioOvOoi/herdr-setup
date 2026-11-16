@@ -177,7 +177,7 @@ const key = (main) => `\u001f${main}`;
     /checkoutRecord\(s, ps\) \{\n    const rec = checkoutRecordOf\(s\);\n    if \(rec\) return rec;/.test(src));
   check("worktree identity is the record, not a folder prefix",
     /isWorktree\(s\) \{\n    if \(!s\) return false;\n    const rec = spaceRecord\(s\);\n    if \(rec\) return Boolean\(rec\.isWorktree\);/.test(src));
-  // Ctrl+J/K arrive as a shared write from `handle`; another copy's write does
+  // Ctrl+J/K arrive as a shared write from the sidebar; another copy's write does
   // not repaint this view, so the consumer must notice it without one.
   check("the handed-back walk notices a signal from another copy",
     /this\.walkTick = cx\.timer\.every\(60,/.test(src) && /this\.walkSeen = this\.walkMark;/.test(src));
