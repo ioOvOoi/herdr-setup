@@ -49,13 +49,17 @@ try {
   check("install.sh copies the theme", existsSync(join(home, "themes", "omarchy.json")));
   check("install.sh copies the sidebar mod", existsSync(join(home, "mods", "agents-list", "main.js")));
   check("install.sh does not copy the removed search mod", !existsSync(join(home, "mods", "search")));
+  check("install.sh does not copy the removed handle mod", !existsSync(join(home, "mods", "handle")));
 
   check("Alt+F is installed in the layout's own section",
     layout["alt-f"] === "mod.open:agents-list", JSON.stringify(layout["alt-f"]));
   check("the tab and space numbers are installed",
     layout["alt-1"] === "tab.select:1" && layout["ctrl-1"] === "space.select:1");
   check("the sidebar walk is installed",
-    layout["ctrl-j"] === "handle.dir_down" && layout["ctrl-k"] === "handle.dir_up");
+    layout["ctrl-j"] === "agents-list.dir_down" && layout["ctrl-k"] === "agents-list.dir_up");
+  check("Ctrl+Shift+B collapses the sidebar in this layout",
+    layout["ctrl-shift-b"] === "agents-list.toggle_sidebar"
+    && keys.global?.["ctrl-shift-b"] === undefined);
 
   check("the person's own global key is kept",
     keys.global["my-key"] === "space.new" && keys.global["ctrl-shift-t"] === "tab.new");

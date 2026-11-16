@@ -71,6 +71,36 @@ function toggleSidebar() {
   run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 223) : window()?.platform === "macos" ? 76 : 44 });
 }
 
+// Swap the sidebar with the work column, and the panel with the terminal pane.
+function flipLayout() {
+  const tree = JSON.parse(JSON.stringify(layout() ?? {}));
+  if (!Array.isArray(tree.children) || tree.children.length < 2) return;
+  tree.children.reverse();
+  const body = find(tree, "work-body");
+  if (body?.type === "row" && Array.isArray(body.children) && body.children.length > 1) body.children.reverse();
+  const panel = find(tree, "panel");
+  if (panel) {
+    // A hidden panel's live width is its collapsed sliver; keep the real one.
+    if (!panel.hidden && (panel.size?.px ?? 0) >= (panel.min ?? 0)) setShared("panel.width", panel.size.px);
+    else if ((panel.size?.px ?? 0) < (panel.min ?? 0)) panel.size.px = shared("panel.width") ?? 368;
+  }
+  run("layout.set", { layout: tree });
+}
+
+// Closing the last terminal of a space opens a fresh shell in that same space
+// first, so Herdr never jumps to another space's terminal.
+function closeFocused(name) {
+  const f = focused();
+  const tabId = f?.tab;
+  if (!tabId) return;
+  const space = spaces().find((s) => s.tabs.some((t) => t.id === tabId));
+  if (!space) return;
+  if (name === "close_pane" && f.pane && panes().filter((p) => p.tab === tabId).length > 1) return run("pane.close", { pane: f.pane });
+  if (space.tabs.length > 1) return run("tab.close", { id: tabId });
+  run("tab.new", { space: space.id });
+  run("tab.close", { id: tabId });
+}
+
 const clean = (s) => (s ?? "").replace(/^[^\p{L}\p{N}]+/u, "").trim();
 
 // localStorage is a cache an older version (or a bad write) may have left in a
@@ -202,6 +232,9 @@ export class Sidebar extends Workspace {
     this.scroll = ScrollHandle.new();
     this.sel = null;
     this.entries = [];
+    // The shared walk counter: the app's Ctrl+J/K binding bypasses a focused
+    // panel, so the sidebar writes the step and its own watcher reads it back.
+    this.moves = 0;
     // Focus is claimed a moment before the window answers `is_focused()`, so the
     // style follows this flag: set the instant Alt+B lands, never a frame late.
     this.kbd = false;
@@ -901,8 +934,17 @@ export class Sidebar extends Workspace {
 
   // What the sidebar's keys do. Each one is a row of the space menu, run against
   // a space — the selected one, else the active one — so the keyboard and the
-  // menu do exactly the same thing.
+  // menu do exactly the same thing. The layout's own keys come here too: the
+  // sidebar is mounted on the rail, and the footer and terminals list are not.
   command(c, cx) {
+    if (c === "dir_down" || c === "dir_up") {
+      const direction = c === "dir_down" ? "down" : "up";
+      if (shared("search.open")) return setShared("search.move", `${direction}:${++this.moves}`);
+      if (shared("sidebar.kb")) return setShared("sidebar.move", `${direction}:${++this.moves}`);
+      return run("pane.go", { direction });
+    }
+    if (c === "flip_layout") return flipLayout();
+    if (c === "close_pane" || c === "close_tab") return closeFocused(c);
     const space = this.spaceOf(this.entry());
     if (c === "focus_sidebar") return this.toggleFocus(cx);
     if (c === "toggle_sidebar") return toggleSidebar();
@@ -1905,7 +1947,7 @@ export class Sidebar extends Workspace {
               () => openOverlay({ mod: "agents-list", kind: "popup", width: 230, height: 172, props: { sortMenu: true } }), 13, sort.id !== "priority"))
             .child(this.iconButton(t, "ag-search", "mods/icons/search.svg", "Search \u00b7 Alt+F",
               () => run("mod.open", { name: "agents-list" })))
-            .child(this.iconButton(t, "ag-hide", "mods/icons/sidebar.svg", "Hide sidebar", toggleSidebar)),
+            .child(this.iconButton(t, "ag-hide", "mods/icons/sidebar.svg", "Collapse sidebar", toggleSidebar)),
         ),
       )
       .when(list.length === 0 && !collapsed, (el) =>
@@ -2891,7 +2933,7 @@ export class Sidebar extends Workspace {
                 () => run("mod.open", { name: "agents-list" })))
               .child(div().w(1).h(14).mx(1).flex_none().bg(wash(t.foreground, "10")))
               .when(bySpaces, (el) => el.child(this.iconButton(t, "ag-new-space", "mods/workspace-chrome/plus.svg", "New space", () => run("space.new"))))
-              .child(this.iconButton(t, "ag-hide", "mods/icons/sidebar.svg", "Hide sidebar", toggleSidebar))),
+              .child(this.iconButton(t, "ag-hide", "mods/icons/sidebar.svg", "Collapse sidebar", toggleSidebar))),
         ),
       )
       .when(list.length === 0 && !bySpaces && !collapsed, (el) =>

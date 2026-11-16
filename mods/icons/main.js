@@ -25,19 +25,14 @@ const isPinned = (s) => Boolean(s?.id) && pinnedList().some((p) => (p.id
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
-// Hide the sidebar whole, or bring it back at the width it had. A floating
-// handle (mods/handle) is the way back while it is hidden.
+// Collapse the sidebar to the rail, or open it again at the width it had.
 function toggleSidebar() {
   const side = find(layout(), "sidebar");
   if (!side) return;
   const width = side.size?.px;
-  if (!side.hidden && width && width >= (side.min ?? 0)) setShared("sidebar.width", width);
-  setShared("sidebar.collapsed", !side.hidden);
-  run("layout.toggle", { id: "sidebar" });
-  if (side.hidden) {
-    const back = shared("sidebar.width");
-    if (back) run("layout.resize", { id: "sidebar", px: back });
-  }
+  if (!narrow()) setShared("sidebar.width", width);
+  setShared("sidebar.collapsed", !narrow());
+  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 223) : window()?.platform === "macos" ? 76 : 44 });
 }
 
 // Swap the sidebar with the work column, and the panel with the terminal pane.

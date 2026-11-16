@@ -49,14 +49,14 @@ cd herdr-setup
 herdr-app do layout.switch --name workspace
 ```
 
-`install.sh` copies the layout, its nine mods and its theme into
+`install.sh` copies the layout, its eight mods and its theme into
 `~/.config/herdr-app`, then merges this layout's keys into `keys.json`: its
 section is updated, and the bundle's `global` and `terminal` bindings are added
 only where yours has none (the old file is kept as `keys.json.bak.<time>`). It
 touches nothing else. Set `HERDR_APP_HOME` to install elsewhere.
 
 To install by hand, copy `layouts/workspace.json` and `layouts/workspace.svg`
-into `layouts/`, the nine mod folders listed below into `mods/`, and
+into `layouts/`, the eight mod folders listed below into `mods/`, and
 `themes/omarchy.json` into `themes/`, then merge the `layout:workspace` section
 of this repository's `keys.json` into yours (and any `global`/`terminal` keys
 your file is missing).
@@ -72,8 +72,8 @@ Every binding, with what it does, is in
 [docs/bindings.md](docs/bindings.md) — the page is checked against `keys.json`,
 so the two cannot drift.
 
-`Ctrl+Shift+B` (Herdr's own key) still toggles the sidebar. With it hidden, a
-small tab floats at the window edge to bring it back. `Alt+B` puts the keyboard
+`Ctrl+Shift+B` collapses the sidebar to its rail, and again opens it at the
+width it had. There is no hidden state and no floating tab. `Alt+B` puts the keyboard
 in the sidebar, and `Alt+Shift+N`, `Alt+W`, `Alt+Shift+W`, `Alt+Shift+R` and
 `Alt+Shift+Q` run its space and worktree actions from anywhere in the layout.
 
@@ -108,7 +108,7 @@ socket) out of it.
 
 ## Mods
 
-The layout ships nine mods as parts of itself, not separate downloads:
+The layout ships eight mods as parts of itself, not separate downloads:
 
 | Mod | What it is |
 |---|---|
@@ -118,8 +118,7 @@ The layout ships nine mods as parts of itself, not separate downloads:
 | `icons` | Icons shared by the other mods, and an optional top bar. |
 | `shortcuts` | The searchable shortcut sheet. |
 | `worktrees` | New / open / remove worktree dialogs and stop confirmations. |
-| `sidebar-menu` | Right-click the sidebar: move it to the other side, or hide it. |
-| `handle` | The floating tab at the window edge while the sidebar is hidden. The left copy also takes `Ctrl+J`/`Ctrl+K`, the layout flip, a new worktree, and close pane/tab, so those keys work while the sidebar is hidden or folded to the rail. |
+| `sidebar-menu` | Right-click the sidebar: move it to the other side, or collapse it. |
 | `pane-header` | An optional pane header. **Unused by this layout.** |
 
 Each folder is self-contained and can be copied into another Herdr home. The
@@ -171,7 +170,8 @@ theme. Any other theme works too: point the layout's `theme` at a name in
 The root is two columns: a fixed 223 px `sidebar` and the `work` column. Inside
 the sidebar, `agents` and `terminals` share the height by weight over a 32 px
 `sidebar-footer`. The work column shows the active tab as cards, with a hidden
-368 px `files`/`changes` panel. Two `handle` blocks float on the side edges.
+368 px `files`/`changes` panel. The sidebar has no hidden state: narrow, it is
+the rail; `Ctrl+Shift+B` folds it there.
 
 The ids matter: mods find their places by id (`sidebar`, `agents`, `terminals`,
 `sidebar-footer`, `main`, `panel`, `panel-body`, `work-body`), so renaming a node

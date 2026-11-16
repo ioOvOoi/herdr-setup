@@ -1,9 +1,9 @@
 // The sidebar's context menu, shown by right-clicking anywhere in the sidebar.
-// It mirrors the layout left/right and hides the sidebar.
+// It mirrors the layout left/right and collapses the sidebar to the rail.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { theme, layout, run, props, closeOverlay, keys, shared, setShared } from "herdr";
+import { theme, layout, run, props, closeOverlay, keys, shared, setShared, window } from "herdr";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -12,6 +12,19 @@ function find(node, id) {
     if (found) return found;
   }
   return null;
+}
+
+// The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
+const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
+
+// Collapse the sidebar to the rail, or open it again at the width it had.
+function toggleSidebar() {
+  const side = find(layout(), "sidebar");
+  if (!side) return;
+  const width = side.size?.px;
+  if (!narrow()) setShared("sidebar.width", width);
+  setShared("sidebar.collapsed", !narrow());
+  run("layout.resize", { id: "sidebar", px: narrow() ? (shared("sidebar.width") ?? 223) : window()?.platform === "macos" ? 76 : 44 });
 }
 
 // Swap the sidebar with the work column, and the panel with the terminal pane.
@@ -56,10 +69,11 @@ export default class LayoutMenu extends View {
   render() {
     const t = theme();
     const left = layout()?.children?.[0]?.id === "sidebar";
-    const moveKey = binding("handle.flip_layout") || binding("footer.flip_layout");
-    const hideKey = binding("layout.toggle:sidebar");
+    const collapsed = narrow();
+    const moveKey = binding("agents-list.flip_layout") || binding("footer.flip_layout");
+    const toggleKey = binding("agents-list.toggle_sidebar");
     const move = () => { flipLayout(); closeOverlay(props()?.overlay); };
-    const hide = () => { run("layout.hide", { id: "sidebar" }); closeOverlay(props()?.overlay); };
+    const collapse = () => { toggleSidebar(); closeOverlay(props()?.overlay); };
     const row = (id, icon, label, hint, action) => h_flex().id(id).h(32).flex_none().px(8).gap(10).items_center().rounded(7)
       .text_color(t.muted).hover((s) => s.bg(wash(t.foreground, "0b")).text_color(t.foreground)).cursor_pointer()
       .on_click(action)
@@ -76,6 +90,6 @@ export default class LayoutMenu extends View {
       })
       .child(row("flip-layout", left ? "panel-right" : "panel-left", left ? "Move sidebar to the right" : "Move sidebar to the left", moveKey, move))
       .child(div().h(1).mx(4).my(3).bg(wash(t.foreground, "09")))
-      .child(row("hide-sidebar", "sidebar", "Hide sidebar", hideKey, hide));
+      .child(row("toggle-sidebar", "sidebar", collapsed ? "Expand sidebar" : "Collapse sidebar", toggleKey, collapse));
   }
 }

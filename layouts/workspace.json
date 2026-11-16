@@ -1,5 +1,4 @@
 {
-  "preview": "layouts/workspace.svg",
   "id": "root",
   "cloned_from": {
     "name": "main",
@@ -25,7 +24,7 @@
                 }
               },
               "size": {
-                "weight": 2.146141767501831
+                "weight": 2.24560546875
               },
               "min": 90
             },
@@ -36,7 +35,7 @@
                 "mod": "terminals-list"
               },
               "size": {
-                "weight": 0.8538582921028137
+                "weight": 0.75439453125
               },
               "min": 90
             }
@@ -141,27 +140,10 @@
     14,
     12
   ],
-  "floating": [
-    {
-      "id": "handle-left",
-      "content": {
-        "mod": "handle"
-      },
-      "edge": "left",
-      "align": "center"
-    },
-    {
-      "id": "handle-right",
-      "content": {
-        "mod": "handle"
-      },
-      "edge": "right",
-      "align": "center"
-    }
-  ],
   "titlebar": "none",
   "traffic_lights": [
     12,
     16
-  ]
+  ],
+  "preview": "layouts/workspace.svg"
 }

@@ -16,7 +16,7 @@ window edge is its edge), not resizable by its edge — it collapses instead.
 - **`AGENTS`** (top, 2.15 weight, min 90 px): a 42 px header (8 px above the
   label, 6 below, a hairline under it) with a `9.5 px` semibold muted `AGENTS`
   label, a count pill, and three 26 px buttons — sort (clock), search
-  (magnifier), hide sidebar (panel icon). Under it, status groups: each header
+  (magnifier), collapse sidebar (panel icon). Under it, status groups: each header
   is 27 px with 6 px above — a status dot, a `9.5 px` semibold label, a count
   pill and a hairline, with a chevron to fold the group. Rows are 30 px: a 20 px
   program tile, the agent's name at `12.5 px` (foreground when the row is focused), an
@@ -38,9 +38,8 @@ tab as cards — 10 px radius, 1 px `border` (1 px `accent` while the pane has t
 keyboard), `background` fill, 8 px between panes, framed even when the tab has a
 single pane. Terminal text sits 14 px from the top and 12 px from the side.
 
-**Two floating tabs**, 24 × 60 px, `popover` fill, 10 px radius, hairline border
-and a small shadow, centred on the left and right edges. Only the one on the
-sidebar's own side draws, and only while the sidebar is hidden.
+**No floating tabs.** Narrow, the sidebar is the rail; `Ctrl+Shift+B` folds it
+there and unfolds it at the width it had. There is no hidden state to rescue.
 
 The whole window has no title bar; on macOS the traffic lights sit at (12, 16).
 
@@ -129,11 +128,12 @@ closes the space / stops the agent / removes the worktree, `Ctrl+P` pins,
 stepping, at the same 70 ms pace as the sheet, aimed past the row they just
 left so two quick presses do not aim at the same neighbour. `Esc` leaves, and
 `N`, `G`, `F` stay for a new space, opening a worktree and folding. Walking with
-`Ctrl+J`/`K` goes through the left sidebar handle, like the sheet's: the app's keymap takes
+`Ctrl+J`/`K` goes through the sidebar itself, like the sheet's: the app's keymap takes
 those keys, so the sidebar says `shared("sidebar.kb")` while it holds the
-keyboard and the handle answers with `shared("sidebar.move")`, polled only then.
-The handle stays shown when the sidebar is hidden and when the rail is folded,
-which is when the footer and the terminals list are not.
+keyboard and answers with `shared("sidebar.move")`, polled only then. The
+sidebar owns the layout's keys (`Ctrl+J/K`, the flip, close pane/tab, a new
+worktree and `Ctrl+Shift+B`) because it stays mounted when the rail folds and
+the footer and the terminals list are put away.
 The sheet lists all of these under "Sidebar · with its keyboard"; the
 sidebar itself draws no hint row. Adding or removing a space from the list keeps
 the keyboard there: the sidebar re-claims its focus handle as the app settles
@@ -170,11 +170,11 @@ and offers to make one.
   belongs to when there is more than one; the status dot is the agent's.
 - Right-click a terminal row: Herdr's own pane menu, aimed at *that* pane. Right-
   click anywhere in the sidebar (headers included): this setup's menu, with two
-  rows — *Move sidebar to the right/left* (`Ctrl+Shift+M`) and *Hide sidebar*
+  rows — *Move sidebar to the right/left* (`Ctrl+Shift+M`) and *Collapse sidebar*
   (`Ctrl+Shift+B`) — each showing its key.
 - Drag the footer: the window moves (the strip is the drag handle; its buttons
-  stop the press). `Ctrl+Shift+B` hides the sidebar; the floating tab appears on
-  its side and brings it back at the width it had.
+  stop the press). `Ctrl+Shift+B` folds the sidebar into the rail, and again opens
+  it at the width it had; there is no hidden state and no floating tab.
 - Narrower than 160 px, the sidebar is a rail. The agents list becomes a column
   of 26 px cells with tooltips, centred in the rail: an unfold chevron at the top,
   the space's avatar and its state mark, and search, shortcuts and settings on the
@@ -203,9 +203,9 @@ and offers to make one.
 - `Ctrl+Shift+M` flips the whole sidebar to the other side (the layout's two root
   children swap, and with them the panel and the terminal pane); `Ctrl+Shift+D`
   opens the new-worktree dialog for the space you are in.
-- Those keys, and `Ctrl+Shift+X` / `Ctrl+Shift+W`, are `handle.*` commands on the
-  left edge tab. It stays in the layout when the sidebar is hidden and when the
-  rail hides the footer and the terminals list.
+- Those keys, and `Ctrl+Shift+X` / `Ctrl+Shift+W`, are `agents-list.*` commands on
+  the sidebar. It stays mounted when the rail folds and the footer and the
+  terminals list are put away.
 
 **The search sheet** (720 × 560, opened by `Alt+F` or the sidebar's magnifier)
 
@@ -224,7 +224,7 @@ and offers to make one.
   move, `Enter` to go (space → select it, agent → focus it, worktree → open it,
   pin → open a space there, or go to the space already there).
 - **`Ctrl+J`/`Ctrl+K` are shared with pane movement, and separated by the panel.**
-  `keys.json` (under `layout:workspace`) binds them to `handle.dir_down`/`dir_up`,
+  `keys.json` (under `layout:workspace`) binds them to `agents-list.dir_down`/`dir_up`,
   which moves pane focus when no panel is open, hands them to the find sheet when
   it is (`shared("search.open")` → `shared("search.move")`), and to the sidebar
   when its keyboard is there (`shared("sidebar.kb")` → `shared("sidebar.move")`).
@@ -295,21 +295,17 @@ row root                     background canvas · theme {light,dark: omarchy}
             └─ block changes mod changes (Herdr's)
 ```
 
-floating, on the root: `handle-left` (`edge: left`, `align: center`) and
-`handle-right` (mirrored), both `mod handle`.
-
 Mods, all `"place": "none"` (the layout decides where they draw):
 
 | Mod | Props | What it does |
 |---|---|---|
 | `agents-list` | `{sidebar:true}`; no props: the `Alt+F` sheet; `{menu}` / `{sortMenu}`: its popups | The sidebar and the find sheet, one mod. `workspace-engine.js` is the logic both use (spaces, pins, removals, worktrees, order, row actions); `sidebar.js` and `palette.js` are the two drawings. `agents()`, `setAgentOrder`, `terminal.pin`, `agent.focus`, `keys()`; agent state in `localStorage` (`changed`) and the sort in shared `agents.sort`. |
 | `terminals-list` | — | The TERMINALS list. `panes()`, `spaces()`, `focused()`, `tab.select`, `pane.focus`, `tab.new`, `tab.close`, `pane.close`, `layout.show/hide/select`; panel choice per space in `localStorage` (`panels`). |
-| `footer` | — | The footer and the sidebar menu trigger, plus the deleted-space sweep. It still answers `dir_down`/`dir_up`, `flip_layout` and `worktree_new` when a key is rebound onto it. `spaces()`, `layout()`, `layout.toggle/resize/set`, `shared` `sidebar.width`, `sidebar.collapsed`, `spaces.pinned`, `search.open`, `search.move`. |
+| `footer` | — | The footer and the sidebar menu trigger, plus the deleted-space sweep. It still answers `dir_down`/`dir_up`, `flip_layout` and `worktree_new` when a key is rebound onto it. `spaces()`, `layout()`, `layout.set`, `shared` `sidebar.width`, `sidebar.collapsed`, `spaces.pinned`, `search.open`, `search.move`. |
 | `icons` | — | Icons every other mod loads (`mods/icons/*.svg`), plus a top bar used by other layouts: space chip (`git worktree list --porcelain` for the repo's name), search, settings, sidebar toggle, window buttons where the OS draws none. |
 | `shortcuts` | overlay | The keys sheet. `keys()`, `commands()`. |
 | `worktrees` | `{space?, folder?, machine?, action}` or `{agent}` | Dialogs: new, open, remove worktree; remove a space; stop an agent. Runs `git worktree list/add/remove` with `exec`, `spaces()`, `space.new/close`, `terminal.kill`; finds `$HOME` with `sh -c 'printf %s "$HOME"'` (PowerShell on Windows). |
-| `sidebar-menu` | overlay | The sidebar's right-click menu. `layout()`, `layout.set` (flip), `layout.hide`, `keys()` for the hints. |
-| `handle` | — | The edge tab while the sidebar is hidden, and the layout keys that have to work then: `Ctrl+J/K` (`handle.dir_down`/`dir_up`), flip (`handle.flip_layout`), new worktree (`handle.worktree_new`), close pane and close tab. Only the left copy listens. `placement()`, `nextCommand()`, `layout()`, `layout.show/resize/set`, `pane.go`, `pane.close`, `tab.close`, `tab.new`. |
+| `sidebar-menu` | overlay | The sidebar's right-click menu. `layout()`, `layout.set` (flip), `layout.resize` (collapse/expand), `keys()` for the hints. |
 | `pane-header` | — | Optional pane header (program, folder, working/needs-you/done, split, zoom, close). Not used by this layout. |
 
 The keys are the repository's `keys.json`: `install.sh` updates its
@@ -338,9 +334,9 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
   rejects an import outside a mod's own folder (and a symlink to one), so the
   shared rules in `workspace-engine.js` only work with both views in `mods/agents-list/`.
   The sheet draws `mods/agents-list/{layers,pin,x}.svg` from its own folder.
-  Its cross-mod needs are the `worktrees` dialogs behind `Ctrl+A` and `Ctrl+D`,
-  and `handle` for the `Ctrl+J`/`Ctrl+K` handshake — `↑`/`↓` work without
-  either. The footer still answers those commands if a key is pointed at it. The layout's block must carry `"props": {"sidebar": true}`: without
+  Its cross-mod needs are the `worktrees` dialogs behind `Ctrl+A` and `Ctrl+D`.
+  The sidebar owns the `Ctrl+J`/`Ctrl+K` handshake itself (it is mounted on the
+  rail); `↑`/`↓` work without the handshake. The footer still answers those commands if a key is pointed at it. The layout's block must carry `"props": {"sidebar": true}`: without
   it the block is the sheet.
 - **The root draws its view itself; it never hands back a `cx.new` child.**
   Herdr re-renders a mod's root view on every live change (spaces, agents,
@@ -457,14 +453,14 @@ foreground `#c1c1c1`, selection `#333333`, accent/solid `#8a9a7b`).
 - Dragging the sidebar narrower than 160 px leaves the avatar rail — each cell is
   the space's first letter in its colour, with its state mark on the corner (a
   spinner, `!`, a dot or an idle ring), and the current space wears the accent
-  ring; widening it brings both lists back. Hiding it (`Ctrl+Shift+B`) floats the
-  edge tab, which restores the earlier width.
+  ring; widening it brings both lists back. `Ctrl+Shift+B` folds it to the rail,
+  and again opens it at the width it had; no edge tab appears.
 - Right-clicking the sidebar opens the two-row menu with `Ctrl+Shift+M` and
   `Ctrl+Shift+B` beside the rows; right-clicking a terminal row opens Herdr's
   pane menu aimed at that row's pane.
 - The keyboard icon in the footer opens the keys sheet, where typing `search`
   finds the search binding and `Esc` closes it.
-- `herdr-app check mods/<each>` passes for all nine mods, and `herdr-app status`
+- `herdr-app check mods/<each>` passes for all eight mods, and `herdr-app status`
   reports no errors.
 - The ten test files pass: `node tests/*.test.mjs`. They cut functions out of
   the mods and run them with stubs, so they fail when the code changes rather
