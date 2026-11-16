@@ -18,9 +18,9 @@ if [ ! -d "$home" ]; then
   exit 1
 fi
 
-# The eight mods of this bundle, by name: copying mods/ wholesale would take
+# The nine mods of this bundle, by name: copying mods/ wholesale would take
 # Herdr's own mods (and its scratch files) along with it.
-BUNDLE="agents-list terminals-list footer icons shortcuts worktrees sidebar-menu pane-header"
+BUNDLE="agents-list terminals-list footer icons shortcuts worktrees sidebar-menu pane-header hoverfocus"
 
 mkdir -p "$home/layouts" "$home/mods" "$home/themes"
 cp "$here/layouts/workspace.json" "$home/layouts/"
