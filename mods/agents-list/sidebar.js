@@ -2,7 +2,7 @@
 // A viewed done agent stays in Done until left.
 
 import { div, image, svg } from "gpui-kit";
-import { v_flex, h_flex, ScrollHandle } from "gpui-base";
+import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, machines, run, exec, hc, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, watchFolder, notify, nextCommand } from "herdr";
 import {
   Workspace, wash, place, norm, tidyPath, base, inWorktrees, isRemoving, removingList,
@@ -35,6 +35,12 @@ function find(node, id) {
 
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(frameCache("layout", layout), "sidebar")?.size?.px ?? Infinity) < 160;
+
+// The list's bar: this far in from the top and bottom, and the width of the
+// lane the pointer can grab (the thumb itself is thinner).
+const BAR_INSET = 3;
+const BAR_LANE = 9;
+const BAR_WIDTH = 3;
 
 // A watch event counts when it can change the branch, the ahead/behind counts,
 // or the checkout list. The index, the object store and a file save do not.
@@ -275,7 +281,16 @@ export class Sidebar extends Workspace {
     // The keyboard in the sidebar: Alt+B hands it here and takes it back. The
     // rows it moves through are collected on each render, in the order drawn.
     this.handle = cx.focus_handle();
-    this.scroll = ScrollHandle.new();
+    // The list scrolls here (see `scroller`): the app's bar cannot be made
+    // thin or accented from a mod, so this one is drawn instead of it.
+    this.scrollTop = 0;
+    this.viewH = {};     // the list's viewport height, per view
+    this.contentH = {};  // everything inside it, per view
+    this.rowH = {};      // each row's height, per view: how reveal knows where one is
+    this.pad = {};       // the list's own top padding, per view
+    this.bar = null;     // the drawn thumb's geometry, read by the pointer
+    this.barDrag = null; // the grab that owns the pointer, while one does
+    this.barHover = false;
     this.sel = null;
     this.entries = [];
     // The shared walk counter: the app's Ctrl+J/K binding bypasses a focused
@@ -1093,6 +1108,7 @@ export class Sidebar extends Workspace {
   // The keyboard left the list: a press outside, or a pane asked for it. Never
   // steal it back — the press that took it away is already doing its own work.
   blur(cx) {
+    this.barDrag = null;
     this.blurred = true;
     this.kbd = false;
     this.kbdSeen = false;
@@ -1104,6 +1120,9 @@ export class Sidebar extends Workspace {
   // Back inside: the press will focus the panel itself (track_focus), so only the
   // "left already" answer is cleared here.
   touch(cx) {
+    // A press anywhere in the panel ends a bar drag the pointer let go of
+    // somewhere the release never came back from.
+    this.barDrag = null;
     if (!this.blurred) return;
     this.blurred = false;
     this.kbd = true;
@@ -1142,7 +1161,7 @@ export class Sidebar extends Workspace {
       cx.notify();
     });
     if (rail) cx.timer.after(150, (cx) => {
-      if (this.kb() && !this.entry()) { this.sel = this.focusKey(); this.scroll?.scroll_to_item(0); }
+      if (this.kb() && !this.entry()) { this.sel = this.focusKey(); this.scrollTop = 0; }
       cx.notify();
     });
   }
@@ -1185,7 +1204,173 @@ export class Sidebar extends Workspace {
     const count = Math.min(Math.abs(steps), list.length);
     for (let i = 0; i < count; i++) at = Math.max(0, Math.min(list.length - 1, at + dir));
     this.sel = list[at].key;
-    this.scroll?.scroll_to_item(list[at].at);
+    this.reveal(list[at].at, this.bar?.key ?? "spaces");
+  }
+
+  // ---- The list's own scroll, and the bar drawn for it --------------------
+  //
+  // The app's bar is sixteen pixels wide, square and grey, and a mod cannot
+  // change any of that: its width, its colours and its radius are the base
+  // theme's, written in Rust, with no setter in this API. Clipping it only
+  // hides the grey, never tints it.
+  //
+  // So the list scrolls here instead. The wheel moves `scrollTop`, the rows are
+  // drawn `scrollTop` pixels up, and the bar is a thumb this mod paints: three
+  // pixels of the theme's accent, fully rounded, no track, a little wider while
+  // the pointer is on it. The wheel, the press on the bar, its drag and the
+  // keyboard's reveal all do what they did before; only the grey pipe is gone.
+  //
+  // `key` names the view ("spaces", "plain"): the two lists have different rows
+  // and different heights, and a sort switch must not read one's numbers
+  // against the other's.
+
+  // The list, its rows, and the lane the pointer grabs. Everything inside is
+  // absolutely placed so it can be moved without the viewport resizing it.
+  scroller(t, rows, key, opts = {}) {
+    const padTop = opts.padTop ?? 0;
+    const padBottom = opts.padBottom ?? 0;
+    this.pad[key] = padTop;
+    const hs = (this.rowH[key] ??= []);
+    const viewH = this.viewH[key] ?? 0;
+    const contentH = this.contentH[key] ?? 0;
+    const max = Math.max(0, contentH - viewH);
+    // A list that shrank under the pointer leaves the offset past its end.
+    this.scrollTop = Math.max(0, Math.min(this.scrollTop, max));
+    const track = Math.max(0, viewH - BAR_INSET * 2);
+    const on = track > 0 && max > 0.5;
+    const thumbH = on ? Math.min(track, Math.max(26, track * viewH / contentH)) : 0;
+    const thumbY = on ? (track - thumbH) * (this.scrollTop / max) : 0;
+    this.bar = { key, track, thumbH, thumbY, max };
+    return v_flex()
+      .relative()
+      .flex_1()
+      .min_h(0)
+      .overflow_hidden()
+      .on_size_change((size, cx) => {
+        if (Math.abs((this.viewH[key] ?? -1) - size.height) < 0.5) return;
+        this.viewH[key] = size.height;
+        cx.notify();
+      })
+      .on_scroll_wheel((e, cx) => this.listWheel(e, cx))
+      .on_mouse_move((e, cx) => this.barMove(e, cx))
+      .on_mouse_up("left", (_e, cx) => {
+        let again = false;
+        // A drag let go outside the rows leaves no pointer-up on a row: clear it
+        // here, so the next click can't read as a move.
+        if (this.pressed !== null) {
+          this.pressed = null;
+          this.over = null;
+          again = true;
+        }
+        if (this.barDrag) {
+          this.barDrag = null;
+          again = true;
+        }
+        if (again) cx.notify();
+      })
+      .child(v_flex()
+        // Absolute, so its height is the rows' own however tall they get, and
+        // `top` can move it: a scrolled list, with nothing in the layout moving.
+        .absolute()
+        .left(0)
+        .right(0)
+        .top(padTop - this.scrollTop)
+        .pl(8)
+        .pr(12)
+        .when(padBottom > 0, (el) => el.pb(padBottom))
+        .on_size_change((size, cx) => {
+          if (Math.abs((this.contentH[key] ?? -1) - size.height) < 0.5) return;
+          this.contentH[key] = size.height;
+          cx.notify();
+        })
+        // One measured wrapper per row: `reveal` sums them to find a row, since
+        // there is no scroll area left to hand it a row index. The heights are
+        // read after layout, so no repaint is asked for here.
+        .children(rows.map((row, i) => div()
+          .id(`${key}-row-${i}`)
+          .flex_none()
+          .on_size_change((size) => { hs[i] = size.height; })
+          .child(row))))
+      .when(on, (el) => el.child(div()
+        .id(`${key}-bar`)
+        .absolute()
+        .top(BAR_INSET)
+        .bottom(BAR_INSET)
+        .right(0)
+        .w(BAR_LANE)
+        .cursor_default()
+        .on_hover((over, cx) => {
+          if (this.barHover === over) return;
+          this.barHover = over;
+          cx.notify();
+        })
+        .on_mouse_down("left", (e, cx) => this.barDown(e, cx))
+        .child(div()
+          .absolute()
+          .right(BAR_INSET)
+          .top(Math.round(thumbY))
+          .w(this.barHover ? BAR_WIDTH + 1 : BAR_WIDTH)
+          .h(Math.round(thumbH))
+          .rounded_full()
+          // Quiet at rest, the accent's own strength under the pointer: a bar
+          // that sits in the corner without asking to be looked at.
+          .bg(this.barHover ? wash(t.accent, "cc") : wash(t.accent, "80")))));
+  }
+
+  // Where a pointer at `y` in the track scrolls to: the thumb's travel is the
+  // track less its own length, and that maps onto the offset's whole range.
+  scrollToY(y) {
+    const g = this.bar;
+    if (!g) return 0;
+    const span = Math.max(1, g.track - g.thumbH);
+    return Math.max(0, Math.min((y / span) * g.max, g.max));
+  }
+
+  // A press on the bar takes the thumb, or jumps there and takes it from the
+  // press, the way a scrollbar has always worked.
+  barDown(e, cx) {
+    const g = this.bar;
+    if (!g || !(g.track > 0) || !(g.max > 0)) return;
+    const y = Math.max(0, Math.min(e.local_position?.y ?? 0, g.track));
+    const held = y >= g.thumbY && y <= g.thumbY + g.thumbH;
+    const grab = held ? y - g.thumbY : g.thumbH / 2;
+    this.barDrag = { grab };
+    if (!held) this.scrollTop = this.scrollToY(y - grab);
+    cx.stop_propagation();
+    cx.notify();
+  }
+
+  // The pointer, while it holds the thumb. The lane starts BAR_INSET down,
+  // and the move arrives against the list's own box.
+  barMove(e, cx) {
+    if (!this.barDrag) return;
+    const next = this.scrollToY((e.local_position?.y ?? 0) - BAR_INSET - this.barDrag.grab);
+    if (next === this.scrollTop) return;
+    this.scrollTop = next;
+    cx.notify();
+  }
+
+  listWheel(e, cx) {
+    const g = this.bar;
+    if (!g || !(g.max > 0)) return;
+    const next = Math.max(0, Math.min(this.scrollTop - (e.delta?.y ?? 0), g.max));
+    if (next === this.scrollTop) return;
+    this.scrollTop = next;
+    cx.notify();
+  }
+
+  // Keep the keyboard's row on screen. A row's top is the measured heights of
+  // the rows above it, plus the list's own padding.
+  reveal(at, key) {
+    const hs = this.rowH[key] ?? [];
+    if (!(at >= 0) || at >= hs.length) return;
+    let top = this.pad[key] ?? 0;
+    for (let i = 0; i < at; i++) top += hs[i] ?? 0;
+    const h = hs[at] ?? 0;
+    const viewH = this.viewH[key] ?? 0;
+    const max = Math.max(0, (this.contentH[key] ?? 0) - viewH);
+    if (top < this.scrollTop) this.scrollTop = Math.max(0, Math.min(top, max));
+    else if (top + h > this.scrollTop + viewH) this.scrollTop = Math.max(0, Math.min(top + h - viewH, max));
   }
 
   // The spaces in the order the list draws them, within one section: a step is
@@ -2032,16 +2217,8 @@ export class Sidebar extends Workspace {
         el.child(div().px(14).pt(4).text_size(12).text_color(t.dim)
           .child("No agent status yet. Agents show up here when they report their status. Older versions and agents inside tmux may not.")),
       )
-      // Room on the right for the scrollbar gutter, so it cannot clip the rows.
-      .child(v_flex().id("ag-list").flex_1().min_h(0).pl(8).pr(12).py(0).overflow_y_scrollbar().mode("always").track_scroll(this.scroll)
-        .on_mouse_up("left", (_e, cx) => {
-          if (this.pressed !== null) {
-            this.pressed = null;
-            this.over = null;
-            cx.notify();
-          }
-        })
-        .children(rows));
+      // The list, scrolled and barred by this mod (see `scroller`).
+      .child(this.scroller(t, rows, "plain"));
   }
 
   render(cx) {
@@ -3056,20 +3233,10 @@ export class Sidebar extends Workspace {
           .child(div().text_size(12.5).font_medium().text_color(t.muted).child("No agents yet"))
           .child(div().text_size(10.5).text_color(wash(t.muted, "cc")).text_center().child("Agents appear here once they report their status."))),
       )
-      // Room on the right for the scrollbar gutter: without it the scrollbar sat
-      // on top of the rows' last icons and clipped them.
-      .child(v_flex().id("ag-list").flex_1().min_h(0).pt(3).pb(3).pl(8).pr(12).overflow_y_scrollbar().mode("always").track_scroll(this.scroll)
-        .on_mouse_up("left", (_e, cx) => {
-          // A drag let go outside the rows leaves no pointer-up on a row: clear it
-          // here, so the next click can't read as a move.
-          if (this.pressed !== null) {
-            this.pressed = null;
-            this.over = null;
-            cx.notify();
-          }
-        })
-        .children(rows)
-        .when(rows.length === 0 && bySpaces, (el) => el.child(v_flex().flex_none().px(20).pt(34).gap(7).items_center()
+      // The list, scrolled and barred by this mod (see `scroller`). The empty
+      // state is a row like any other, so it scrolls with the rest.
+      .child(this.scroller(t, rows.length === 0 && bySpaces
+        ? [v_flex().flex_none().px(20).pt(34).gap(7).items_center()
           .child(div().size(36).rounded(10).bg(wash(t.foreground, "06")).border(1).border_color(wash(t.foreground, "0c"))
             .flex().items_center().justify_center()
             .child(svg("mods/icons/folder-plus.svg").size(16).text_color(t.muted)))
@@ -3081,7 +3248,8 @@ export class Sidebar extends Workspace {
             .hover((x) => x.bg(wash(t.accent, "26")).text_color(t.foreground))
             .on_click(() => run("space.new"))
             .child(svg("mods/icons/plus.svg").size(12))
-            .child(div().text_size(11.5).font_medium().child("New space"))))));
+            .child(div().text_size(11.5).font_medium().child("New space")))]
+        : rows, "spaces", { padTop: 3, padBottom: 3 }));
     } finally { endPaint(); }
   }
 }
